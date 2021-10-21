@@ -1,0 +1,1434 @@
+---
+title:  Age variability and time averaging in oyster reef death assemblages in Florida
+author:
+  - name: Stephen R. Durham
+    email: stephen.durham@floridadep.gov
+    affiliation: FDEP
+    footnote: 1
+  - name: Gregory P. Dietl
+    email: gpd3@cornell.edu
+    affiliation: PRI,CU
+  - name: Cheryl P. Clark
+    email: cheryl.p.clark@floridadep.gov
+    affiliation: FDEP
+address:
+  - code: FDEP
+    address: Florida Department of Environmental Protection, Tallahassee, FL, USA 32399
+  - code: PRI
+    address: Paleontological Research Institution, Ithaca, NY, USA 14850
+  - code: CU
+    address: Department of Earth and Atmospheric Sciences, Cornell University, Ithaca, NY, USA 14850
+# footnote:
+#   - code: 1
+#     text: "Corresponding Author"
+#  - code: 2
+#    text: "Equal contribution"
+#abstract: |
+#  This is the abstract.
+#  It consists of two paragraphs.
+journal: "National Oceanic and Atmospheric Administration"
+date: ""
+bibliography: MyLibrary2.bib
+linenumbers: false
+numbersections: true
+csl: elsevier-harvard.csl
+#output: rticles::elsevier_article
+output:
+  bookdown::pdf_book:
+    base_format: rticles::elsevier_article
+    keep_tex: yes
+editor_options: 
+  chunk_output_type: console
+layout: 3p
+header-includes:
+- \usepackage{booktabs}
+- \usepackage{longtable}
+- \usepackage{array}
+- \usepackage{multirow}
+- \usepackage{wrapfig}
+- \usepackage{float}
+- \floatplacement{figure}{H}
+- \usepackage{colortbl}
+- \usepackage{pdflscape}
+- \usepackage{tabu}
+- \usepackage{threeparttable}
+- \usepackage{threeparttablex}
+- \usepackage[normalem]{ulem}
+- \usepackage{makecell}
+- \usepackage{xcolor}
+- \renewenvironment{abstract}{}{}
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(sf)
+library(data.table)
+library(ggplot2)
+library(tidyverse)
+library(maps)
+library(ggspatial)
+library(rnaturalearth)
+library(ggrepel)
+library(lmodel2)
+library(kableExtra)
+library(rmarkdown)
+library(gtable)
+library(grid)
+library(cowplot)
+library(lemon)
+library(egg)
+library(ggtext)
+library(colorspace)
+library(brms)
+
+#See this link for converting this document to Word format: https://www.joelnitta.com/post/rmd-to-docx/. I used the following function based on the suggested methods at the link: pandoc_convert(here::here("HOBS_geochronology_ms2/ms2.tex"), to = "docx", output = here::here("HOBS_geochronology_ms2/ms2.docx"), citeproc = T)
+
+HOBSdat <- fread(here::here("ID5035_HOBS_MasterDataFile_Invoice6_final_inc14C.csv"))
+fmoddat <- fread(here::here("HOBS_geochronology_ms2/Data/14C_01022021_AllR.csv"))
+sampsum  <- fread(here::here('sampleSummary_2021-05-20.csv'))
+posteriors <- fread(here::here('HOBS_Posteriors_all.csv')) #formerly specdat
+specsum <- fread(here::here('specimenSummary_2021-05-20.csv'))
+MKetal_posteriors <- fread(here::here('AppendixDR2_PosteriorDistributions_dataonly.csv'))
+MKetal_specsum <- fread(here::here('AppendixDR1_dataSummaryTable_dataonly.csv'))
+pricats <- fread(here::here("HOBS_Geochronology_DAspecimensVWW.csv"))
+
+names(specsum)<-str_replace_all(names(specsum), c(" " = "_"))
+specsum$median_age_bp <- abs(specsum$median_age - 2020) #present = 2020
+specsum$loc <- substring(specsum$name, 1, 2)
+locs_abbrev <- unique(specsum$loc)
+locs_abbrev_corr <- c("BH", "GI-EC", "GR", "HC-MC", "JI-WC", "LB", "LC", "LSG", "MR", "NP", "PC")
+locs_full <- c("Big Hickory Island", "Goose Island & East Cove", "Guana River", "Hendry & Mullock Creeks", 
+               "Jack Island", "Lemon Bay", "Lone Cabbage Island", "Little St. George Island", "Matanzas River",
+               "New Pass", "Pellicer Creek")
+specsum$loc_full <- specsum$loc
+for(i in seq_along(locs_abbrev)){
+specsum <- specsum %>% dplyr::mutate_at(c("loc_full"), stringr::str_replace_all, pattern = locs_abbrev[i], replacement = locs_full[i])
+}
+for(i in seq_along(locs_abbrev)){
+  specsum <- specsum %>% dplyr::mutate_at(c("loc"), stringr::str_replace_all, pattern = locs_abbrev[i], replacement = locs_abbrev_corr[i])
+}
+specsum$reefID <- paste0(specsum$loc, " R", specsum$reef)
+
+
+posteriors$value_bp <- abs(posteriors$value - 2019)
+posteriors$loc <- substring(posteriors$name, 1, 2)
+posteriors$loc_full <- posteriors$loc
+for(i in seq_along(locs_abbrev)){
+  posteriors <- posteriors %>% dplyr::mutate_at(c("loc_full"), stringr::str_replace_all, pattern = locs_abbrev[i], replacement = locs_full[i])
+}
+for(i in seq_along(locs_abbrev)){
+  posteriors <- posteriors %>% dplyr::mutate_at(c("loc"), stringr::str_replace_all, pattern = locs_abbrev[i], replacement = locs_abbrev_corr[i])
+}
+posteriors$reefID <- paste0(posteriors$loc, " R", posteriors$reef)
+
+
+```
+
+\vspace{2.5in}
+
+>_This project was funded in part, through a grant agreement from the Florida Department of Environmental Protection, Florida Coastal Management Program, by a grant provided by the Office of Ocean and Coastal Resource Management under the Coastal Zone Management Act of 1972, as amended, National Oceanic and Atmospheric Administration Award No. NA18NOS4190080. The views, statements, findings, conclusions and recommendations expressed herein are those of the author(s) and do not necessarily reflect the views of the State of Florida, NOAA or any of their subagencies._
+
+\medskip
+
+```{r logos, echo=FALSE, fig.show="hold", out.width="20%", fig.align="center"}
+logos <- list.files(path = here::here("HOBS_geochronology_ms2/Figures/logos/"), pattern = ".png", full.names = TRUE)
+knitr::include_graphics(logos[1:3])
+```
+
+\newpage
+
+INTRODUCTION
+============
+
+In the past decade, interest among paleontologists in applications of their data and methods to the management and conservation of natural resources has grown substantially. One of the most common approaches in this discipline, conservation paleobiology, is the documentation of a variety of metrics and evidence from death assemblages, the preservable remains of organisms (e.g., shells, bones, and other hard parts) that accumulate on the surface and within sediments in various environments, such as the seafloor, lakebeds, and caves [@kidwellTimeaveragingFidelityModern2013]. Death assemblages have a couple useful properties for conservation paleobiological investigations. First, they represent a time-lagged and time-averaged condition of the habitat relative to real-time data on the living biota [@kowalewskiHighresolutionEstimatesTemporal1998; @kidwellTimeaveragingFidelityModern2013]. This means that a death assemblage will represent a historical condition relative to the corresponding living community, and that remains of multiple ages are mixed together, such that the historical condition is an averaged picture over a number of years. This time-averaging tends to smooth out the short-term variability in many characteristics of living communities, which can be an advantage of death assemblage data over some noisy real-time monitoring datasets. Second, death assemblages are often stratigraphically ordered such that more deeply buried remains are older than more shallowly buried remains or those at the surface. Therefore, it is often possible for conservation paleobiologists to obtain data from multiple time periods from a core. Thus, as long as the scale of time-averaging results in an appropriate resolution for the question being investigated, location-specific, long-term changes can often be documented retrospectively using a series of death assemblage samples.
+
+Death assemblages have been used to document temporal changes in community composition, or species attributes over time from direct assessments of the remains themselves [e.g., size or taxonomic identity, @kidwellDiscordanceLivingDeath2007, @dietlGeohistoricalRecordsIndicate2016], or proxy information derived from them [e.g., estimates of environmental variables in the past from geochemical proxies, @gillikinChemicalSclerochronology2019]. Despite a large body of literature supporting the promising nature of death assemblages for applied paleobiology, case studies of applications are still relatively rare. One potential contributing factor to the scarcity of case studies is the difficulty of putting death assemblage data in a solid temporal context. Geochronological dating services (e.g., radiocarbon or amino acid geochronology) are typically expensive and their results require substantial expertise to interpret, leading many conservation paleobiological studies to either gloss over uncertainties regarding age and time-averaging or cite general age-depth or time-averaging relationships from similar depositional settings.
+
+However, many applied circumstances require more specific temporal context for paleobiological data. This was the case for the historical oyster body size (HOBS) project, which was a collaboration between the Paleontological Research Institution and the Florida Department of Environmental Protection (FDEP) to address a specific data need for FDEP's Statewide Ecosystem Assessment of Coastal and Aquatic Resources (SEACAR). The SEACAR project aimed to assess the status and trends of five priority submerged habitat types (submerged aquatic vegetation, coral reefs, oyster reefs, coastal wetlands and the water column) within the areas managed by the FDEP Office of Resilience and Coastal Protection by aggregating data collected by FDEP and other academic institutions, non-governmental organizations, and federal, state and local government agencies. Oyster reefs were included in SEACAR because _Crassostrea virginica_ reefs are a prominent nearshore coastal habitat type across much of the Florida coastline, including within almost all of the coastal and estuarine areas managed by FDEP, with a recent compilation of oyster habitat maps across the state totaling more than 19,580 acres of oyster reef area [@radabaughOysterIntegratedMapping2019]. Oyster reefs are also economically important in Florida. The approximate average value of statewide landings between 1986 and 2021 was over \$4.2 million per year [@PublicFisheriesDependentMonitoring] and the value of their other associated ecosystem services (e.g., habitat provision, nitrogen removal, shoreline protection) have been estimated at over \$10,000 per hectare per year [@grabowskiEconomicValuationEcosystem2012]. Finally, there is also a substantial amount of existing data on oyster reefs from most areas of the state, however, it all was collected within the last 15-20 years and few records were longer than about 5 years. One of the indicators being used by FDEP to assess oyster reef habitat condition for SEACAR was live oyster size class, and the HOBS project was developed to help fill the historical data gap by estimating historical oyster body sizes using hand-core samples from the death assemblages of living oyster reefs. 
+
+The ultimate utility of this approach for supplementing the real-time monitoring data on oyster body size available to SEACAR, depended on the age and time-averaging properties of the oyster death assemblage samples. For instance, how tightly integrated the death assemblage size data and the real-time monitoring data could be for analysis of oyster size trends was dependent on the accuracy and precision of the geochronological information for each sample. In addition, by law the FDEP is charged with maintaining many of the managed areas in conditions comparable to those at the time of establishment; given that the oldest aquatic preserve in the state was established in 1966, the younger the death assemblage samples were, the more actionable the body size information derived from them would be. We expected that oyster reef death assemblages would have lower scales of time-averaging than a typical mollusk death assemblage, because the cementation of the oyster shells to one another in the reef framework would inhibit mixing processes, as has been demonstrated for death assemblages from seagrass beds [@arkleEvidenceStratigraphyMolluscan2018a], however, we needed age and time-averaging estimates for each sample. We therefore devoted substantial HOBS project resources to understanding the age and scales of time-averaging across all of the reefs sampled. The resulting dataset, which to our knowledge covers the widest geographic area of any other death assemblage geochronology investigation to-date, also presented an opportunity to examine geographic variation in depth-age relationships and scales of time-averaging on oyster reefs. Geographic variation in death assemblage preservation may be important, because the size, shape and composition of oyster reefs can vary significantly from watershed to watershed depending on factors such as temperature, salinity, water energy (e.g., flow speed and direction; frequency and strength of boat wakes), tidal amplitude and sedimentation rates [@bahrEcologyIntertidalOyster1981]. 
+
+Here we show that oyster reef death assemblages preserve reliably recent and high-resolution stratigraphic records relative to other molluscan death assemblages documented to-date. The oyster reef death assemblages also had some of the lowest estimated scales of time-averaging of any molluscan death assemblage, suggesting these records are often appropriate for decadal-scale historical investigations. We also highlight how the geographic variability in our dataset demonstrates the importance of location-specific geochronological investigations, despite the generally low mixing rates and rapid burial rates we have documented.
+
+
+MATERIAL AND METHODS
+====================
+
+We focused our sampling on 11 different areas around the state that corresponded with FDEP managed areas and existing live oyster population monitoring data on body size, including in the Apalachicola Bay and Suwannee Sound areas in northwest Florida (Apalachicola Bay National Estuarine Research Reserve and Apalachicola Bay Aquatic Preserve, and Big Bend Seagrasses Aquatic Preserve, respectively); Lemon Bay and Estero Bay in southwest Florida (Lemon Bay Aquatic Preserve and Estero Bay Aquatic Preserve, respectively); the Indian River Lagoon in east-central Florida (Indian River-Vero Beach to Ft. Pierce Aquatic Preserve); and Guana River, Matanzas River, and Pellicer Creek in northeast Florida (Guana River Marsh Aquatic Preserve and the Guana Tolomato Matanzas National Estuarine Research Reserve; Figure \@ref(fig:LocalityMap)). Using ArcGIS, 12 reefs were randomly selected in each sampling area from the "Oyster_Beds_in_Florida" map layer^[current version available from https://geodata.myfwc.com/datasets/oyster-beds-in-florida?geometry=-100.316%2C24.682%2C-66.939%2C31.461, accessed 5/19/2021.], which was produced by the Oyster Integrated Mapping and Monitoring Program of the Florida Fish and Wildlife Conservation Commission [@radabaughOysterIntegratedMapping2019]. The map layer is not comprehensive, but it is the most complete Florida oyster reef map available. In the field, the reefs sampled were selected semi-randomly from the 12 randomly selected reefs (or in some cases, nearby reefs) based on factors such as accessibility, tide level, and reef condition (e.g., presence of live oysters, likelihood of having a substantial death assemblage).
+
+
+```{r LocalityMapcode, eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+
+HOBSdat <- subset(HOBSdat, !is.na(HOBSdat$Sample_n))
+HOBSdat[Locality == "Jack Island/Wildcat Cove", Locality := "Jack Island"]
+HOBSdat[ , Locality := str_replace_all(Locality, "Island", "Is.")]
+HOBSdat[ , Locality := str_replace_all(Locality, "Creek", "Cr.")]
+HOBSdat[ , Locality := str_replace_all(Locality, "River", "R.")]
+HOBSdat[ , Locality := str_replace_all(Locality, "Cr.s", "Cr.")]
+HOBSdat_sites <- HOBSdat[, c("Loc_ID", "Locality", "Lat", "Lon")]
+HOBSdat_sites <- unique(HOBSdat_sites)
+HOBSdat_sites <- st_as_sf(HOBSdat_sites, coords = c("Lon", "Lat"), remove = F, crs = 4326)
+fwcoy <- st_read(here::here("Oyster_Beds_in_Florida_05-25-2021/Oyster_Beds_in_Florida.shp"))
+fwcoy_m <- st_transform(fwcoy, 4326)
+rcp <- st_read(here::here("orcp_all_sites/ORCP_Managed_Areas.shp"))
+rcp_m <- st_transform(rcp, 4326)
+FL <- map_data("county", "florida") %>%
+  select(lon = long, lat, group, id = subregion)
+FL2 <- st_as_sf(FL, coords = c("lon", "lat"), remove = F, crs = 4326)
+
+HOBSdat_loc <- HOBSdat_sites[0,]
+for(i in unique(HOBSdat_sites$Locality)){
+  loc_i <- subset(HOBSdat_sites, HOBSdat_sites$Locality == i)[1,]
+  HOBSdat_loc <- rbind(HOBSdat_loc, loc_i)
+}
+
+world_map_data <- ne_countries(scale = "medium", returnclass = "sf")
+state_map_data <- map('state', fill = TRUE, plot = FALSE) %>% st_as_sf()
+
+HOBSdat_loc %>% 
+  mutate(x_nudge = case_when( Locality == "Goose Is./East Cove" ~ -0.3
+                             ,Locality == "Little St. George Is." ~ -1.5
+                             ,Locality == "Lone Cabbage" ~ -1
+                             ,Locality == "Lemon Bay" ~ -1.2
+                             ,Locality == "Hendry/Mullock Cr." ~ -2.1
+                             ,Locality == "New Pass" ~ -1.5
+                             ,Locality == "Big Hickory" ~ -1.4
+                             ,Locality == "Jack Is." ~ 1.2
+                             ,Locality == "Pellicer Cr." ~ 1.5
+                             ,Locality == "Matanzas R." ~ 1.5
+                             ,Locality == "Guana R." ~ 1.6
+                             ,TRUE ~ 0)
+         ,y_nudge = case_when(Locality == "Goose Is./East Cove" ~ -0.8
+                             ,Locality == "Little St. George Is." ~ -0.3
+                             ,Locality == "Lone Cabbage" ~ -1
+                             ,Locality == "Lemon Bay" ~ 0.1
+                             ,Locality == "Hendry/Mullock Cr." ~ -0.1
+                             ,Locality == "New Pass" ~ -0.5
+                             ,Locality == "Big Hickory" ~ -0.9
+                             ,Locality == "Jack Is." ~ 0.2
+                             ,Locality == "Pellicer Cr." ~ -0.2
+                             ,Locality == "Matanzas R." ~ 0.1
+                             ,Locality == "Guana R." ~ 0.2
+                             ,TRUE ~ 0)
+  ) ->
+  HOBSdat_loc
+#Modeled after map here: https://www.sharpsightlabs.com/blog/mapping-texas-ports-with-geom_sf-part2/
+png(file = here::here(paste0("HOBS_geochronology_ms2/Figures/HOBS_geochron_Fig1_", Sys.Date(), ".png")), width = 2000, height = 1500, res = 275)
+ggplot(data = FL, aes(lon, lat, group = group)) +
+  geom_sf(data = world_map_data, inherit.aes = FALSE) +
+  geom_sf(data = state_map_data, inherit.aes = FALSE) +
+  geom_sf(data = subset(state_map_data, state_map_data$ID == "florida"), fill = "antiquewhite1", inherit.aes = FALSE) +
+  geom_sf(data = rcp_m, aes(fill = "dodgerblue"), color = "dodgerblue", alpha = 0.5, lwd = 0.5, inherit.aes = FALSE) +
+  geom_sf(data = fwcoy_m, aes(fill = "firebrick"), color = "firebrick", lwd = 1.5, inherit.aes = FALSE) +
+  geom_text_repel(data = HOBSdat_loc, aes(Lon, Lat, label = Locality), size = 13.5*0.35, nudge_x = HOBSdat_loc$x_nudge, nudge_y = HOBSdat_loc$y_nudge, inherit.aes = FALSE) +
+  geom_point(data = HOBSdat_loc, aes(Lon, Lat), color = "black", fill = "yellow1", shape = 21, size = 3.5, stroke = 1.5, inherit.aes = FALSE) +
+  coord_sf(xlim = c(-87.5, -79), ylim = c(24.5, 31)) +
+  theme_bw() +
+  theme(panel.background = element_rect(fill = "lightblue1"), 
+        legend.title = element_blank(),
+        legend.position = c(0.26, 0.1),
+        legend.background = element_rect(fill = "transparent"),
+        legend.key = element_rect(colour = NA, fill = NA),
+        #legend.key.size = unit(0.5, "lines"),
+        text = element_text(size = 13.5)) +
+  labs(x = "Lat.", y = "Lon.") +
+  scale_fill_manual(name = NULL,
+                    labels = c("FDEP ORCP managed areas", "Mapped oyster reefs (not to scale)"),
+                    values = c("dodgerblue", "firebrick"),
+                    guide = guide_legend(override.aes = list(color = "grey10", lwd = 0.25)))
+dev.off()
+
+```
+
+```{r LocalityMap, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE, out.width = "75%", fig.align="center", fig.cap="A map showing sample collection localities in relation to areas managed by the Florida Department of Environmental Protection Office of Resilience and Coastal Protection (FDEP ORCP) and mapped oyster reef distribution around Florida. Oyster reef map layer from Florida Fish and Wildlife Conservation Commission."}
+knitr::include_graphics(here::here("HOBS_geochronology_ms2/Figures/HOBS_geochron_Fig1_2021-06-11.png"))
+```
+
+Each selected oyster reef was sampled according to the Oyster Condition Assessment protocol [@waltersOysterConditionAssessment2015]: a 30m transect tape was extended parallel to the long axis of the reef and across the portion of the reef that appeared to have the densest accumulation of oysters, and three 0.0625m^2^ (25cm x 25cm) quadrats were placed at distances along the transect selected with a random number generator. At each quadrat, the top 15cm of material was removed and placed to the side in order to reach a depth below the living oysters and at which buried shells were unlikely to be re-exhumed [i.e., below the taphonomically active zone, @powellRiseFallCrassostrea2012; @rodriguezOysterReefsCan2014; @waltersOysterConditionAssessment2015]. Once the hole was prepared, two bulk samples were extracted covering the subsequent two 10cm depth intervals (i.e., 15-25cm and 25-35cm burial depths) in order to obtain more than one temporal interval per sample hole. Each sample was individually bagged in 4mil polyethylene sample bags labeled with the sample information. The 11 sampling areas were visited by the research team over the course of three field trips in late summer to fall of 2018; each trip's samples were sealed in moving boxes with packing paper in groups of two to four and were stored in a climate controlled facility. After all fieldwork was completed, the samples were transported to the Paleontological Research Institution in Ithaca, New York for processing, curation, data collection, and long-term storage. Sampling was authorized by Environmental Resource Program Permit Exemption Verification 0366243-001-EE/19 (Florida Dept. of Environmental Protection), Special Activity License SAL-18-2064-SR (Florida Fish and Wildlife Conservation Commission), Division of Recreation and Parks Scientific Research/Collecting Permit 07051810 (Florida Department of Environmental Protection), Nationwide Permit Number 4 SAJ-2018-01876 (U. S. Army Corps of Engineers), and a Visiting Investigator Permit from the Guana Tolomato Matanzas National Estuarine Research Reserve, all issued to S. Durham. In addition, the target sampling areas were modified prior to beginning fieldwork in response to a review by the Florida Department of State Division of Historical Resources to ensure no impact to archaeological resources (DHR Project File 2018-3543). All samples collected were transferred to the Paleontological Research Institution for long-term storage (PRI Accession Number 1860).
+
+In the laboratory, each sample bag was emptied over stacked 6mm and 1.9mm mesh sieves, and a subsample of the matrix material was collected before the sample was washed and the oyster shells were separated from the other sample material. All left valves $\geq$ 20mm in shell height and estimated to be at least 90% complete in each sample were measured and assigned numbers that were used to randomly select specimens for radiocarbon analysis. Initially, 25 specimens were randomly selected from all numbered specimens across all processed samples from the same reef x stratigraphic interval (i.e., 15-25cm or 25-35cm burial depths). From those 25 specimens, 12-14 specimens were selected for analysis such that each processed sample was represented by at least 2 specimens. Otherwise, specimens were evaluated in the order in which they were selected and any specimens with substantial bioerosion or other damage to the hinge plate were rejected. However, it became clear early on that specimens from the same burial depth but different locations on a reef could vary in age, so we began randomly selecting 8-10 specimens from each processed sample, from which between four and seven specimens were chosen for analysis as previously described. Using this method we ensured that most processed samples were represented by at least four specimens and samples that were the only one processed for a given reef x stratigraphic interval were represented by at least five specimens. A wedge of shell was cut out of the hinge plate of each selected specimen using a Gryphon C-40 diamond band-saw, after which the fragments were air-dried and placed in labeled polyethylene reclosable bags. All specimens were shipped to the Kaufman lab at Northern Arizona University, where subsamples of the foliated calcite portions of each fragment were prepared for radiocarbon analysis by Jordon Bright. Once prepared, samples were analyzed at the W. M. Keck Carbon Cycle Accelerated Mass Spectrometry facility at the University of California, Irvine. In order to date as many specimens as possible, the majority of analyses were performed on powdered carbonate targets, which are less costly to analyze, but have lower precision than the graphetized targets used in standard AMS radiocarbon analyses [@bushSimpleRapidCost2013]. Eleven specimens were re-analyzed by standard AMS radiocarbon analyses to check the low-precision radiocarbon results, and additional standard AMS analyses were conducted to support calibration of the low-precision radiocarbon results. These included dating two live-caught or known-age oysters from each of our sampling areas to generate local "dead carbon" corrections for the dead shell results and live-caught filter-feeding clams from full-marine salinity to control for the effects of estuarine salinity variability in the oyster specimen results; and dating additional museum oyster specimens of known-age to test the precision of the calibrated dates derived from the rapid carbonate target radiocarbon analysis. Live oyster specimens were collected either by staff from the Florida Department of Agriculture and Consumer Services under the Department's public health authority for the sanitary control of shellfish (_Florida Statutes_ section 597.020 and Florida Administrative Code Rule 5L-1) or by Florida Department of Environmental Protection staff under Special Activity License SAL-20-2259A-SR issued by the Florida Fish and Wildlife Conservation Commission to S. Durham. All live-caught specimens were transferred to the Paleontological Research Institution for long-term storage (PRI Accession Number 1897). Design of the geochronological sampling plan and selection of the techniques were conducted in consultation with Darrell Kaufman (Northern Arizona University), Jordon Bright (Northern Arizona University) and Quan Hua (Australian Nuclear Science and Technology Organisation).
+
+Calibration of the radiocarbon results and estimation of the scale of time-averaging in each sample were conducted by Quan Hua, using the empirical posterior distribution method described in Kowalewski et al. [-@kowalewskiOneFossilRecord2018]. The method utilized OxCal v4.2 [@bronkramseyBayesianAnalysisRadiocarbon2009] and data from Marine13 [@reimerIntCal13Marine13Radiocarbon2013] with a constant regional marine reservoir correction ($\Delta{R} = 5 \pm 32$ years). The method uses empirical posterior distributions of age probabilities for each specimen to estimate 1) the total age variability in a sample as the interquartile range of the possible sample ages weighted by their probabilities and 2) the age-estimation error for individual specimens as the median interquartile range of the possible ages for each specimen in a sample, weighted by their probabilities. The difference between these two values for a given sample is called the corrected posterior age estimate [some studies also refer to this value as residual time averaging, e.g., @dominguezTimeaveragingStratigraphicResolution2016], and is an estimate of the scale of time averaging in the sample, accounting for the specimen-level age estimation error.
+
+Prior to calibration, the radiocarbon results were corrected for "dead" carbon in each sample area by subtracting the weighted mean fraction modern carbon (F^14^C) value of two local live-caught oyster specimens from the weighted mean F^14^C value of two live-caught _Mercenaria_ sp. specimens from near the mouth of Alligator Harbor in northwest Florida. The clams were used because they came from a full-marine salinity environment, so were not expected to be influenced as much by hardwater effects from freshwater influence as the estuarine _C. virginica_ specimens. The F^14^C value for each dead shell specimen dated from each locality was then corrected using the corresponding local dead carbon estimate:
+$$F^{14}C_{Corrected} = \frac{F^{14}C_{Local}}{(1 - DeadC_{Local})}$$
+The dead carbon corrected F^14^C standard deviations were calculated as:
+$$SD_{Corrected} = \sqrt{\left(\frac{SD_{Local F^{14}C}}{(1 - DeadC_{Local})}\right)^2 + \left({SD_{Local DeadC} \times{\frac{F^{14}C_{Local}}{(1 - DeadC_{Local})^2}}}\right)^2}$$
+
+All data analyses were conducted using R statistical software [@rcoreteamLanguageEnvironmentStatistical2021] in the RStudio integrated development environment [@rstudioteamRStudioIntegratedDevelopment2021].
+
+RESULTS
+=======
+
+A total of 126 bulk samples from 31 _C. virginica_ reefs were washed and processed, and a total of 630 of the numbered specimens were randomly selected from the processed samples and sampled for radiocarbon dating (see Figures \@ref(fig:EPDsbyHole-BH) to \@ref(fig:EPDsbyHole-PC) for the age probability empirical posterior distributions for each specimen plotted by sample hole for each locality). Reduced major axis regression of low-precision AMS radiocarbon results against standard AMS radiocarbon results for the 11 oyster specimens analyzed by both methods showed a linear relationship with slope = 0.995 and R^2^ = 0.969, demonstrating good correspondence between the results from the two methods (Figure \@ref(fig:LPvHPplot)). Two specimens from the Florida Museum of Natural History that were collected from Cedar Key in 1979 (lot UF512435) were dated by standard AMS as a test of the accuracy of the bomb-pulse calibration and the median calibrated ages were both 1970, suggesting high accuracy in addition to the good precision demonstrated by the correspondence of the low precision and standard AMS radiocarbon methods.
+
+```{r LPvHPcode, eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+
+HPspec <- unique(subset(fmoddat, fmoddat$Analysis == "HP")$OtherID)
+LPvHP_dat <- subset(fmoddat, fmoddat$OtherID %in% HPspec)
+LPvHP_dat2 <- LPvHP_dat[, c("Analysis", "Loc", "Hole", "OtherID", "F14C", "F14C_sd", "Scenario", "DeadC", "DeadC_sd", "F14C_corr", "F14C_corr_sd")]
+LPvHP_dat2 <- pivot_wider(LPvHP_dat2, names_from = Analysis, values_from = c(F14C, F14C_sd, F14C_corr, F14C_corr_sd))
+LPvHP_mod <- lmodel2(F14C_LP ~ F14C_HP, data = LPvHP_dat2, range.y = "relative", range.x = "relative", nperm = 10000)
+
+coefs <- LPvHP_mod$regression.results
+names(coefs) <- c("method", "intercept", "slope", "angle", "p-value")
+CIs <- LPvHP_mod$confidence.intervals
+names(CIs) <- c("method", "intercept_low", "intercept_high", "slope_low", "slope_high")
+m <- c("SMA")
+fontsize <- 16
+
+png(file = here::here(paste0("HOBS_geochronology_ms2/Figures/HOBS_geochron_Fig2_", Sys.Date(), ".png")), width = 2000, height = 1500, res = 275)
+ggplot() +
+  scale_color_brewer(palette = "Accent", aesthetics = "fill") +
+  geom_point(data = LPvHP_dat2, aes(F14C_HP, F14C_LP, fill = Loc), shape = 21, color = "black", size = 4) +
+  geom_abline(data = subset(CIs, CIs$method %in% m), aes(intercept = intercept_low, slope = slope_high), color = "grey50", lwd = 1, lty = 2) +
+  geom_abline(data = subset(CIs, CIs$method %in% m), aes(intercept = intercept_high, slope = slope_low), color = "grey50", lwd = 1, lty = 2) +
+  geom_abline(data = subset(coefs, coefs$method %in% m), aes(intercept = intercept, slope = slope), color = "black", lwd = 1.2) +
+  coord_cartesian(xlim = c(0.97, 1.25), ylim = c(0.99, 1.21)) +
+  theme_bw() + 
+  theme(axis.text = element_text(size = fontsize),
+        axis.title = element_text(size = fontsize),
+        legend.text = element_text(size = fontsize), 
+        legend.title = element_text(size = fontsize)) +
+  labs(x = expression(paste("HP ", F^14, "C")), y = expression(paste("LP ", F^14, "C")), fill = "Locality") +
+  annotate(geom = "text", 
+           x = 0.99, 
+           y = 1.205,
+           size = fontsize*0.35,
+           label = paste0("y = ", 
+                           round(subset(coefs, coefs$method %in% m)$slope, 3), 
+                           "x", 
+                           ifelse(subset(coefs, coefs$method %in% m)$intercept > 0, 
+                                  paste0(" + ", round(subset(coefs, coefs$method %in% m)$intercept, 3)), 
+                                  paste0(" - ", round(abs(subset(coefs, coefs$method %in% m)$intercept), 3)))),
+           hjust = 0) +
+  annotate(geom = "text",
+           x = 0.99,
+           y = 1.191,
+           size = fontsize*0.35,
+           label = paste0("R^2 == ", round(LPvHP_mod$rsquare, 3)),
+           parse = TRUE,
+           hjust = 0)
+dev.off()
+
+```
+
+```{r LPvHPplot, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE, out.width = "75%", fig.align="center", fig.cap="A plot showing reduced axis regression of dead-carbon-corrected standard AMS radiocarbon results (HP F\\textsuperscript{14}C) for death assemblage specimens against dead-carbon-corrected low-precision (rapid) AMS radiocarbon results (LP F\\textsuperscript{14}C) for the same specimens. Solid line = reduced axis regression line, dashed lines = 97.5\\% confidence interval."}
+knitr::include_graphics(here::here("HOBS_geochronology_ms2/Figures/HOBS_geochron_Fig2_2021-06-02.png"))
+```
+
+Overall, the low-precision radiocarbon results indicated that oyster reef death assemblages are high-resolution archives with preservation of abundant shells from the recent past and low levels of time-averaging: among the 126 dated oyster reef samples, median calibrated ages ranged from 1582 to 2014, but 94.4\% were post-1950, and 50.8\% of the samples had sub-decadal-scale corrected posterior age estimates (0-10 years), 39.7\% had decadal-scale corrected posterior age estimates (11-100 years), and 9.5\% had centennial-scale corrected posterior age estimates (101-1000 years) (see Table \@ref(tab:SampledatCode) for sample-level geochronology results). Moreover, the 10cm stratigraphic intervals sampled showed the expected temporal order (i.e., deeper = older) in most cases: out of the 54 sample holes for which both samples were processed and dated, 81.5\% had median sample ages for the 25-35cm burial depth that were older than, or equal to, the median sample ages of the 15-25cm burial depth material. The results also show that the difference in age and time-averaging at a given burial depth can vary substantially over small spatial scales (i.e., within and between individual reefs; Figures \@ref(fig:TAFacetPlot1), \@ref(fig:TAFacetPlot2), \@ref(fig:CVplot)). In fact, spatial variability in age and time-averaging overall was greater than the variability in age and time-averaging related to burial depth (Figure \@ref(fig:CVplot)) and there was not a consistent relationship between age and time-averaging across localities (Figure \@ref(fig:AgevTAplot-byloc)). There was also no correlation between the scale of time-averaging and sample size, suggesting that, at least among the realized sample sizes, additional sampling did not increase the chance of adding shells of disparate age (Figure \@ref(fig:NvTAplot-byloc)).
+
+```{r SampledatCode, echo=FALSE, fig.cap="Sample information and sample-level geochronology results. Station = station number assigned by the Paleontological Research Institution, message=FALSE, warning=FALSE, Depth=burial depth of the sample, IQR\\textsubscript{AER}=median specimen age-estimatino error, IQR\\textsubscript{CPE}=, IQR\\textsubscript{TAV}=total age variability"}
+
+HOBSdat <- subset(HOBSdat, !is.na(HOBSdat$Sample_n))
+
+posteriors <- fread(here::here("HOBS_Posteriors_all.csv"))
+posteriors[, loc := str_extract(name, "(^..)(?=_)|(^...)(?=_)|(^..-..)(?=_)")]
+posteriors[, sample := str_extract(name, "R.H.S.")]
+posteriors[, sample := paste0(loc, "_", sample)]
+
+cSum <- aggregate(probability ~ name, data = posteriors, FUN = sum)
+
+posteriors2 <- merge(posteriors, cSum, by = "name")
+posteriors2$aProb <- posteriors2$probability.x/posteriors2$probability.y
+
+
+
+medprobs <- posteriors2 %>% group_by(name) %>% mutate(medage = Hmisc::wtd.quantile(value, aProb*10000)[3]) %>% select(name, sample, medage) %>% distinct()
+
+meansampage <- medprobs %>% group_by(sample) %>% summarize(meansampage = round(mean(medage)), sdsampage = sd(medage))
+
+HOBSdat <- merge()
+
+Sampdat <- HOBSdat[, .(Locality, Loc_ID, Reef_ID, Sample_ID, PRI_station, Lat, Lon, IGSN, Collection_date, Collection_time, Transect_Dist_m, Sample, Sample_n, Sample_mean_age, Sample_median_age, Sample_age_range, Sample_minimum_age, Sample_maximum_age, Sample_age_stdev, `Sample_median_specimen_age_variability_(IQR)`, `Sample_total_age_variability_(IQR)`, `Sample_median_specimen_age-estimation_error`, Sample_corrected_posterior_age_estimate, depth, reef, RandL)]
+Sampdat <- distinct(Sampdat)
+Sampdat <- subset(Sampdat, !is.na(Sampdat$Sample_n))
+
+#Proportion of samples with pre/post-bomb median calibrated ages
+prebomb <- nrow(Sampdat[Sample_median_age <= 1950])/nrow(Sampdat)
+postbomb <- nrow(Sampdat[Sample_median_age > 1950])/nrow(Sampdat)
+
+#Proportion of samples with sub-decadal time averaging
+TAprop_yr <- nrow(Sampdat[Sample_corrected_posterior_age_estimate <= 10, ])/nrow(Sampdat)
+TAprop_dec <- nrow(Sampdat[Sample_corrected_posterior_age_estimate > 10 & Sample_corrected_posterior_age_estimate <= 100, ])/nrow(Sampdat)
+TAprop_cen <- nrow(Sampdat[Sample_corrected_posterior_age_estimate > 100 & Sample_corrected_posterior_age_estimate <= 1000, ])/nrow(Sampdat)
+TAprop_mil <- nrow(Sampdat[Sample_corrected_posterior_age_estimate > 1000, ])/nrow(Sampdat)
+
+#Proportion of sample holes where the expected stratigraphic order was recovered
+Sampdat[ , HoleID := paste0(Loc_ID, "_", str_sub(Sample_ID, -6, -3))]
+leveldiffs <- data.table(HoleID = character(), Station = numeric(), Median_1 = numeric(), Median_2 = numeric(), Median_diff = numeric(), CPE_1 = numeric(), CPE_2 = numeric())
+for(i in unique(Sampdat$HoleID)){
+  holedat <- subset(Sampdat, Sampdat$HoleID == i)
+  if(nrow(holedat) < 2) next
+  leveldiffs_i <- data.table(HoleID = i,
+                             Station = unique(holedat$PRI_station),
+                             Median_1 = subset(holedat, holedat$depth == "15-25cm")$Sample_median_age,
+                             Median_2 = subset(holedat, holedat$depth == "25-35cm")$Sample_median_age,
+                             Median_diff = subset(holedat, holedat$depth == "15-25cm")$Sample_median_age - subset(holedat, holedat$depth == "25-35cm")$Sample_median_age,
+                             CPE_1 = subset(holedat, holedat$depth == "15-25cm")$Sample_corrected_posterior_age_estimate,
+                             CPE_2 = subset(holedat, holedat$depth == "25-35cm")$Sample_corrected_posterior_age_estimate)
+  leveldiffs <- rbind(leveldiffs, leveldiffs_i)
+}
+for(i in 1:nrow(leveldiffs)){
+  leveldiffs$Order[i] <- ifelse(leveldiffs$Median_diff[i] >= 0, "Expected", "Unexpected")
+}
+#write.csv(leveldiffs, here::here("HOBS_Geochronology_BurialDepthDiffs.csv"))
+Stratprop_pos <- nrow(leveldiffs[Median_diff >= 0, ])/nrow(leveldiffs)
+Stratprop_neg <- nrow(leveldiffs[Median_diff < 0, ])/nrow(leveldiffs)
+
+#Generate a table of sample-level results
+Sampdat2 <- Sampdat[, .(Locality, PRI_station, IGSN, depth, Sample_n, Sample_median_age, Sample_minimum_age, Sample_maximum_age, `Sample_median_specimen_age-estimation_error`, `Sample_total_age_variability_(IQR)`, Sample_corrected_posterior_age_estimate)]
+Sampdat2[ , `:=` (Sample_median_age = round(Sample_median_age, 0), Sample_minimum_age = round(Sample_minimum_age, 0), Sample_maximum_age = round(Sample_maximum_age, 0), `Sample_median_specimen_age-estimation_error` = round(`Sample_median_specimen_age-estimation_error`, 2), `Sample_total_age_variability_(IQR)` = round(`Sample_total_age_variability_(IQR)`, 2), Sample_corrected_posterior_age_estimate = round(Sample_corrected_posterior_age_estimate, 2))]
+setnames(Sampdat2, c("Locality", "PRI_station", "IGSN", "depth", "Sample_n", "Sample_median_age", "Sample_minimum_age", "Sample_maximum_age", "Sample_median_specimen_age-estimation_error", "Sample_total_age_variability_(IQR)", "Sample_corrected_posterior_age_estimate"), c("Locality", "Station", "IGSN", "Depth", "N", "Median", "Min.", "Max.", "IQR\\textsubscript{AER}", "IQR\\textsubscript{TAV}", "IQR\\textsubscript{CPE}"))
+Sampdat2[Locality == "Jack Island/Wildcat Cove", Locality := "Jack Island"]
+
+#Sampdat_table <- kbl(Sampdat[, .(Locality, PRI_station, IGSN, depth, Sample_n, Sample_median_age, Sample_minimum_age, Sample_maximum_age, `Sample_median_specimen_age-estimation_error`, `Sample_total_age_variability_(IQR)`, Sample_corrected_posterior_age_estimate)], 
+    #booktabs = T,
+    #col.names=c("Locality", "Station", "IGSN", "Depth", "N", "Median age", "Min. age", "Max. age", "IQR\\textsubscript{AER}", "IQR\\textsubscript{TAV}", "IQR\\textsubscript{CPE}")) #%>%
+  #kable_styling(position = "center")
+
+#SampledatTable <- kbl(Sampdat2, booktabs = T)
+#print(SampledatTable)
+
+kbl(Sampdat2, booktabs = T, format = "latex", escape = F, longtable = T, caption = "Sample information and sample-level geochronology results. Station = station number assigned by the Paleontological Research Institution, IGSN = International GeoSample Number, Depth = burial depth of the sample, N = number of specimens dated from each sample, IQR\\textsubscript{AER} = median specimen age-estimation error, IQR\\textsubscript{TAV} = total age variability, IQR\\textsubscript{CPE} = corrected posterior age estimate.") %>%
+  add_header_above(c(" " = 5, "Sample age" = 3, " " = 3)) %>%
+  footnote(threeparttable = T) %>%
+  kable_styling(latex_options = c("repeat_header"), font_size = 7)
+```
+
+```{r CVcode, eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+
+#Function to calculate coefficient of variation
+cv <- function(x){
+  sd(x)/mean(x)
+}
+
+cv_locreefdepth <- Sampdat %>%
+              group_by(Loc_ID, Reef_ID, depth) %>%
+              summarise(c(length(Sample_median_age), mean(Sample_median_age), cv(Sample_median_age), mean(Sample_corrected_posterior_age_estimate), cv(Sample_corrected_posterior_age_estimate))) %>%
+              mutate(type = rep(c("n", "mean_medage", "cv_medage", "mean_ta", "cv_ta"))) %>%
+              pivot_wider(names_from = type, values_from = `c(...)`) %>%
+              mutate(class = "loc_reef_depth")
+
+cv_locdepth <- Sampdat %>%
+              group_by(Loc_ID, depth) %>%
+              summarise(c(length(Sample_median_age), mean(Sample_median_age), cv(Sample_median_age), mean(Sample_corrected_posterior_age_estimate), cv(Sample_corrected_posterior_age_estimate))) %>%
+              mutate(type = rep(c("n", "mean_medage", "cv_medage", "mean_ta", "cv_ta"))) %>%
+              pivot_wider(names_from = type, values_from = `c(...)`) %>%
+              mutate(class = "loc_depth", Reef_ID = NA)
+
+cv_depth <- Sampdat %>%
+              group_by(depth) %>%
+              summarise(c(length(Sample_median_age), mean(Sample_median_age), cv(Sample_median_age), mean(Sample_corrected_posterior_age_estimate), cv(Sample_corrected_posterior_age_estimate))) %>%
+              mutate(type = rep(c("n", "mean_medage", "cv_medage", "mean_ta", "cv_ta"))) %>%
+              pivot_wider(names_from = type, values_from = `c(...)`) %>%
+              mutate(class = "depth", Reef_ID = NA, Loc_ID = NA)
+
+cv_loc <- Sampdat %>%
+              group_by(Loc_ID) %>%
+              summarise(c(length(Sample_median_age), mean(Sample_median_age), cv(Sample_median_age), mean(Sample_corrected_posterior_age_estimate), cv(Sample_corrected_posterior_age_estimate))) %>%
+              mutate(type = rep(c("n", "mean_medage", "cv_medage", "mean_ta", "cv_ta"))) %>%
+              pivot_wider(names_from = type, values_from = `c(...)`) %>%
+              mutate(class = "loc", Reef_ID = NA, depth = NA)
+
+cv_locreef <- Sampdat %>%
+              group_by(Loc_ID, Reef_ID) %>%
+              summarise(c(length(Sample_median_age), mean(Sample_median_age), cv(Sample_median_age), mean(Sample_corrected_posterior_age_estimate), cv(Sample_corrected_posterior_age_estimate))) %>%
+              mutate(type = rep(c("n", "mean_medage", "cv_medage", "mean_ta", "cv_ta"))) %>%
+              pivot_wider(names_from = type, values_from = `c(...)`) %>%
+              mutate(class = "loc_reef", depth = NA)
+
+cv_all <- rbindlist(list(cv_locreefdepth, cv_locdepth, cv_depth, cv_loc, cv_locreef), use.names = TRUE)
+
+setDT(cv_all)
+cv_all[class == "loc", depth := "Both"]
+cv_all[class == "loc_reef", depth := "Both"]
+cv_all[class == "depth", Loc_ID := "All"]
+cv_all[Loc_ID == "JI-WC", Loc_ID := "JI"]
+
+#png(file = here::here(paste0("HOBS_geochronology_ms2/Figures/HOBS_geochron_Fig16a_", Sys.Date(), ".png")), width = 1500, height = 2000, res = 275)
+panelA <- ggplot(cv_all, aes(x = factor(class, levels = c("depth", "loc", "loc_depth", "loc_reef", "loc_reef_depth"), ordered = TRUE), y = cv_medage, fill = Loc_ID, shape = depth)) +
+  geom_jitter(width = 0.2, size = 2, color = "black") +
+  geom_boxplot(aes(x = factor(class, levels = c("depth", "loc", "loc_depth", "loc_reef", "loc_reef_depth")), y = cv_medage), alpha = 0, inherit.aes = FALSE) +
+  scale_y_continuous(trans = "log10") +
+  theme_bw() +
+  theme(legend.position = "none", axis.title.x = element_blank()) +
+  scale_fill_brewer(palette = "Paired") + 
+  scale_x_discrete(labels = c("Burial depth", "Locality", "Locality,\nBurial depth", "Locality,\nReef", "Locality,\nBurial depth,\nReef")) +
+  labs(x = 'Groupings',
+       y = 'Median est. age coeff. of variation',
+       fill = 'Locality',
+       shape = "Burial depth",
+       tag = "A") +
+  scale_shape_manual(values = c(21, 22, 24)) +
+  guides(fill=guide_legend(override.aes=list(shape=21))) 
+#dev.off()
+
+
+panelB <- ggplot(cv_all, aes(x = factor(class, levels = c("depth", "loc", "loc_depth", "loc_reef", "loc_reef_depth")), y = cv_ta, fill = Loc_ID, shape = depth)) +
+  geom_jitter(width = 0.2, size = 2, color = "black") +
+  geom_boxplot(aes(x = factor(class, levels = c("depth", "loc", "loc_depth", "loc_reef", "loc_reef_depth")), y = cv_ta), alpha = 0, inherit.aes = FALSE) +
+  #scale_y_continuous(trans = "log10") +
+  theme_bw() +
+  theme(axis.title.x = element_blank()) +
+  scale_fill_brewer(palette = "Paired") + 
+  scale_x_discrete(labels = c("Burial depth", "Locality", "Locality,\nBurial depth", "Locality,\nReef", "Locality,\nBurial depth,\nReef")) +
+  labs(x = 'Groupings',
+       y = 'CPE coeff. of variation',
+       fill = 'Locality',
+       shape = "Burial depth",
+       tag = "B") +
+  scale_shape_manual(values = c(21, 22, 24)) +
+  guides(fill=guide_legend(override.aes=list(shape=21)))
+
+png(file = here::here(paste0("HOBS_geochronology_ms2/Figures/HOBS_geochron_Fig16_", Sys.Date(), ".png")), width = 2250*1.05, height = 1300*1.05, res = 275)
+grid.arrange(panelA, panelB, nrow = 1, widths = c(2*0.835, 2))
+dev.off()
+
+
+panelA2 <- ggplot(data = subset(cv_all, cv_all$depth == "15-25cm"), aes(x = as.factor(n), y = cv_ta, fill = Loc_ID, shape = class)) +
+  geom_point(size = 2, color = "black") +
+  geom_boxplot(aes(x = as.factor(n), y = cv_ta), alpha = 0, inherit.aes = FALSE) +
+  theme_bw() +
+  theme(legend.position = "none") +
+  scale_fill_brewer(palette = "Paired") +
+  coord_cartesian(ylim = c(0, 2.25)) +
+  labs(x = "Number of samples in CV calculation",
+       y = "CPE coeff. of variation",
+       fill = "Locality",
+       shape = "Groupings",
+       tag = "A") +
+  scale_shape_manual(values = c(21, 22, 24),
+                     labels = c("Burial depth\n \n ", "Locality,\nBurial depth\n ", "Locality,\nBurial depth,\nReef")) +
+  guides(fill = guide_legend(override.aes = list(shape = 21)),
+         shape = guide_legend(keywidth = 0.1, keyheight = 0.1, default.unit = "inch", label.vjust = -5))
+
+panelB2 <- ggplot(data = subset(cv_all, cv_all$depth == "25-35cm"), aes(x = as.factor(n), y = cv_ta, fill = Loc_ID, shape = class)) +
+  geom_point(size = 2, color = "black") +
+  geom_boxplot(aes(x = as.factor(n), y = cv_ta), alpha = 0, inherit.aes = FALSE) +
+  theme_bw() +
+  scale_fill_brewer(palette = "Paired") +
+  coord_cartesian(ylim = c(0, 2.25)) +
+  labs(x = "Number of samples in CV calculation",
+       y = "CPE coeff. of variation",
+       fill = "Locality",
+       shape = "Groupings",
+       tag = "B") +
+  scale_shape_manual(values = c(21, 22, 24),
+                     labels = c("Burial depth\n \n ", "Locality,\nBurial depth\n ", "Locality,\nBurial depth,\nReef")) +
+  guides(fill = guide_legend(override.aes = list(shape = 21)),
+         shape = guide_legend(keywidth = 0.1, keyheight = 0.1, default.unit = "inch", label.vjust = -5))
+
+png(file = here::here(paste0("HOBS_geochronology_ms2/Figures/HOBS_geochron_Fig16b_", Sys.Date(), ".png")), width = 2250*1.05, height = 1300*1.05, res = 275)
+grid.arrange(panelA2, panelB2, nrow = 1, widths = c(2*0.76, 2))
+dev.off()
+
+
+id <- function(x){
+  var(x)/mean(x)
+}
+
+green <- function(x){
+  ((var(x)/mean(x)) - 1) / (length(x) - 1)
+}
+
+green_locreefdepth2 <- Sampdat %>%
+              group_by(Loc_ID, Reef_ID, depth) %>%
+              summarise(c(length(Sample_median_age), mean(Sample_median_age), sd(Sample_median_age), cv(Sample_median_age), id(Sample_median_age), green(Sample_median_age), mean(Sample_corrected_posterior_age_estimate), sd(Sample_corrected_posterior_age_estimate), cv(Sample_corrected_posterior_age_estimate), id(Sample_corrected_posterior_age_estimate), green(Sample_corrected_posterior_age_estimate))) %>%
+              mutate(type = rep(c("n", "mean_medage", "sd_medage", "cv_medage", "id_medage", "green_medage", "mean_ta", "sd_ta", "cv_ta", "id_ta", "green_ta"))) %>%
+              pivot_wider(names_from = type, values_from = `c(...)`) %>%
+              mutate(class = "loc_reef_depth")
+
+green_locdepth <- Sampdat %>%
+              group_by(Loc_ID, depth) %>%
+              summarise(c(length(Sample_median_age), mean(Sample_median_age), sd(Sample_median_age), cv(Sample_median_age), id(Sample_median_age), green(Sample_median_age), mean(Sample_corrected_posterior_age_estimate), sd(Sample_corrected_posterior_age_estimate), cv(Sample_corrected_posterior_age_estimate), id(Sample_corrected_posterior_age_estimate), green(Sample_corrected_posterior_age_estimate))) %>%
+              mutate(type = rep(c("n", "mean_medage", "sd_medage", "cv_medage", "id_medage", "green_medage", "mean_ta", "sd_ta", "cv_ta", "id_ta", "green_ta"))) %>%
+              pivot_wider(names_from = type, values_from = `c(...)`) %>%
+              mutate(class = "loc_depth", Reef_ID = NA)
+
+green_depth <- Sampdat %>%
+              group_by(depth) %>%
+              summarise(c(length(Sample_median_age), mean(Sample_median_age), sd(Sample_median_age), cv(Sample_median_age), id(Sample_median_age), green(Sample_median_age), mean(Sample_corrected_posterior_age_estimate), sd(Sample_corrected_posterior_age_estimate), cv(Sample_corrected_posterior_age_estimate), id(Sample_corrected_posterior_age_estimate), green(Sample_corrected_posterior_age_estimate))) %>%
+              mutate(type = rep(c("n", "mean_medage", "sd_medage", "cv_medage", "id_medage", "green_medage", "mean_ta", "sd_ta", "cv_ta", "id_ta", "green_ta"))) %>%
+              pivot_wider(names_from = type, values_from = `c(...)`) %>%
+              mutate(class = "depth", Reef_ID = NA, Loc_ID = NA)
+
+green_loc <- Sampdat %>%
+              group_by(Loc_ID) %>%
+              summarise(c(length(Sample_median_age), mean(Sample_median_age), sd(Sample_median_age), cv(Sample_median_age), id(Sample_median_age), green(Sample_median_age), mean(Sample_corrected_posterior_age_estimate), sd(Sample_corrected_posterior_age_estimate), cv(Sample_corrected_posterior_age_estimate), id(Sample_corrected_posterior_age_estimate), green(Sample_corrected_posterior_age_estimate))) %>%
+              mutate(type = rep(c("n", "mean_medage", "sd_medage", "cv_medage", "id_medage", "green_medage", "mean_ta", "sd_ta", "cv_ta", "id_ta", "green_ta"))) %>%
+              pivot_wider(names_from = type, values_from = `c(...)`) %>%
+              mutate(class = "loc", Reef_ID = NA, depth = NA)
+
+green_locreef <- Sampdat %>%
+              group_by(Loc_ID, Reef_ID) %>%
+              summarise(c(length(Sample_median_age), mean(Sample_median_age), sd(Sample_median_age), cv(Sample_median_age), id(Sample_median_age), green(Sample_median_age), mean(Sample_corrected_posterior_age_estimate), sd(Sample_corrected_posterior_age_estimate), cv(Sample_corrected_posterior_age_estimate), id(Sample_corrected_posterior_age_estimate), green(Sample_corrected_posterior_age_estimate))) %>%
+              mutate(type = rep(c("n", "mean_medage", "sd_medage", "cv_medage", "id_medage", "green_medage", "mean_ta", "sd_ta", "cv_ta", "id_ta", "green_ta"))) %>%
+              pivot_wider(names_from = type, values_from = `c(...)`) %>%
+              mutate(class = "loc_reef", depth = NA)
+
+green_all <- rbindlist(list(green_locreefdepth2, green_locdepth, green_depth, green_loc, green_locreef), use.names = TRUE)
+
+setDT(green_all)
+green_all[class == "loc", depth := "Both"]
+green_all[class == "loc_reef", depth := "Both"]
+green_all[class == "depth", Loc_ID := "All"]
+green_all[Loc_ID == "JI-WC", Loc_ID := "JI"]
+
+green_all_l <- pivot_longer(green_all, cols = c(6:9), names_to = "disp_type_medage", values_to = "values_medage")
+
+ggplot(subset(green_all_l, green_all_l$disp_type_medage == "green_medage" & green_all_l$depth == "15-25cm")) +
+  geom_point(aes(x = n, y = values_medage, color = disp_type_medage)) +
+  geom_smooth(aes(x = n, y = values_medage, color = disp_type_medage), method = "loess") +
+  theme_bw() +
+  #coord_cartesian(ylim = c(0, 1))
+  facet_wrap(~Reef_ID, scales = "free")
+
+
+  
+cv_sandd <- data.table(var_lev = character(),
+                       Loc_ID = character(),
+                       Reef_ID = character(),
+                       n = integer(),
+                       rng_medage = numeric(),
+                       rng_ta = numeric(),
+                       meancv_medage = numeric(),
+                       meancv_ta = numeric())
+for(i in unique(Sampdat$Reef_ID)){
+  dat_space_1 <- subset(Sampdat, Sampdat$Reef_ID == i & Sampdat$depth == "15-25cm")
+  dat_space_2 <- subset(Sampdat, Sampdat$Reef_ID == i & Sampdat$depth == "25-35cm")
+  depth_cvs <- data.table(var_lev = character(),
+                          Loc_ID = character(),
+                          Reef_ID = character(),
+                          n = integer(),
+                          max_medage = numeric(),
+                          min_medage = numeric(),
+                          max_ta = numeric(),
+                          min_ta = numeric(),
+                          meancv_medage = numeric(),
+                          meancv_ta = numeric())
+  for(d in unique(dat_space_1$Sample_ID)){
+    dat_depth <- subset(Sampdat, Sampdat$Sample_ID == d | Sampdat$Sample_ID == paste0(str_sub(d, 1, -3), "S2"))
+    if(length(unique(dat_depth$Sample_ID)) < 2){
+      next
+      } else{
+      depth_cv <- data.table(var_lev = "time",
+                             Loc_ID = unique(dat_depth$Loc_ID),
+                             Reef_ID = unique(dat_depth$Reef_ID),
+                             n = length(unique(dat_depth$Sample_ID)),
+                             max_medage = max(dat_depth$Sample_median_age),
+                             min_medage = min(dat_depth$Sample_median_age),
+                             max_ta = max(dat_depth$Sample_corrected_posterior_age_estimate),
+                             min_ta = min(dat_depth$Sample_corrected_posterior_age_estimate),
+                             meancv_medage = cv(dat_depth$Sample_median_age),
+                             meancv_ta = cv(dat_depth$Sample_corrected_posterior_age_estimate))
+      depth_cvs <- rbind(depth_cvs, depth_cv)
+    }
+  }
+  
+  depth_cvs_sum <- depth_cvs %>%
+                     group_by(var_lev, Loc_ID, Reef_ID, n) %>%
+                     summarise(n = ifelse(nrow(depth_cvs) > 1, unique(n)*2, n), 
+                               rng_medage = max(depth_cvs$max_medage) - min(depth_cvs$min_medage), 
+                               rng_ta = max(depth_cvs$max_ta) - min(depth_cvs$min_ta),
+                               meancv_medage = mean(meancv_medage), 
+                               meancv_ta = mean(meancv_ta))
+  
+  cv_sandd <- rbind(cv_sandd, depth_cvs_sum)
+  
+  cv_sandd_i <- data.table(var_lev = "space",
+                           Loc_ID = unique(dat_space_1$Loc_ID),
+                           Reef_ID = i,
+                           n = length(unique(dat_space_1$Sample_ID)) + length(unique(dat_space_2$Sample_ID)),
+                           rng_medage = max(c(dat_space_1$Sample_median_age, dat_space_2$Sample_median_age)) - min(c(dat_space_1$Sample_median_age, dat_space_2$Sample_median_age)),
+                           rng_ta = max(c(dat_space_1$Sample_corrected_posterior_age_estimate, dat_space_2$Sample_corrected_posterior_age_estimate)) - min(c(dat_space_1$Sample_corrected_posterior_age_estimate, dat_space_2$Sample_corrected_posterior_age_estimate)),
+                           meancv_medage = ifelse(length(unique(dat_space_2$Sample_ID)) > 1, 
+                                                  mean(cv(dat_space_1$Sample_median_age), cv(dat_space_2$Sample_median_age)),
+                                                  cv(dat_space_1$Sample_median_age)),
+                           meancv_ta = ifelse(length(unique(dat_space_2$Sample_ID)) > 1, 
+                                              mean(cv(dat_space_1$Sample_corrected_posterior_age_estimate), cv(dat_space_2$Sample_corrected_posterior_age_estimate)),
+                                              cv(dat_space_1$Sample_corrected_posterior_age_estimate)))
+    
+   cv_sandd <- rbind(cv_sandd, cv_sandd_i) 
+}
+
+# for(l in unique(cv_sandd$Loc_ID)){
+#   cv_sandd_l <- subset(cv_sandd, cv_sandd$Loc_ID == l)
+#   loc_cvs <- data.table(
+#                         Loc_ID = l,
+#                         Reef_ID = NA,
+#                         n_space = sum(subset(cv_sandd_l, !is.na(cv_sandd_l$Reef_ID) & !is.na(cv_sandd_l$n_space))$n_space),
+#                         n_time = sum(subset(cv_sandd_l, !is.na(cv_sandd_l$Reef_ID) & !is.na(cv_sandd_l$n_time))$n_time),
+#                         cv_medage_space = mean(cv_sandd_l$cv_medage_space, na.rm = TRUE),
+#                         meancv_medage_depth = mean(cv_sandd_l$meancv_medage_depth, na.rm = TRUE),
+#                         cv_ta_space = mean(cv_sandd_l$cv_ta_space, na.rm = TRUE),
+#                         meancv_ta_depth = mean(cv_sandd_l$meancv_ta_depth, na.rm = TRUE)
+#                         )
+#   cv_sandd <- rbind(cv_sandd, loc_cvs)
+# }
+# 
+# statewide <- data.table(Loc_ID = "Statewide", 
+#                         Reef_ID = NA, 
+#                         n_space = sum(subset(cv_sandd, !is.na(cv_sandd$Reef_ID) & !is.na(cv_sandd$n_space))$n_space),
+#                         n_time = sum(subset(cv_sandd, !is.na(cv_sandd$Reef_ID) & !is.na(cv_sandd$n_time))$n_time),
+#                         cv_medage_space = mean(subset(cv_sandd, !is.na(cv_sandd$Reef_ID))$cv_medage_space, na.rm = TRUE),
+#                         meancv_medage_depth = mean(subset(cv_sandd, !is.na(cv_sandd$Reef_ID))$meancv_medage_depth, na.rm = TRUE),
+#                         cv_ta_space = mean(subset(cv_sandd, !is.na(cv_sandd$Reef_ID))$cv_ta_space, na.rm = TRUE),
+#                         meancv_ta_depth = mean(subset(cv_sandd, !is.na(cv_sandd$Reef_ID))$meancv_ta_depth, na.rm = TRUE))
+# cv_sandd <- rbind(cv_sandd, statewide)
+
+# ggplot(cv_sandd) +
+#   geom_point(aes(x = n_space, y = cv_medage_space, color = Loc_ID)) +
+#   coord_cartesian(xlim = c(0, 10), ylim = c(0, 0.2)) +
+#   theme_bw()
+#                
+# cv_sandd[, space_sddiff := (cv_medage_space - meancv_medage_depth)]
+# cv_sandd[, depth_sddiff := (cv_ta_space - meancv_ta_depth)]
+# #cv_sandd[, medage_sddiff_s := (medage_sddiff - min(cv_sandd$medage_sddiff, na.rm = TRUE))/(max(cv_sandd$medage_sddiff, na.rm = TRUE) - min(cv_sandd$medage_sddiff, na.rm = TRUE))]
+# 
+# cv_sandd[is.na(Reef_ID), Reef_ID := Loc_ID]
+# cv_sandd[n_space < 4, Cat := "Reef"]
+# cv_sandd[n_space >= 4 & n_space < 72, Cat := "Locality"]
+# cv_sandd[n_space == 72, Cat := "Statewide"]
+# 
+# ggplot(cv_sandd) +
+#   geom_col(aes(x = space_sddiff, y = Reef_ID, fill = Cat), color = "black") +
+#   geom_vline(xintercept = 0, color = "black") +
+#   theme_bw()
+# 
+# ggplot(cv_sandd) +
+#   geom_col(aes(x = depth_sddiff, y = Reef_ID, fill = Cat), color = "black") +
+#   geom_vline(xintercept = 0, color = "black") +
+#   theme_bw()
+
+#Trying a GLMM to describe variation
+
+cv_all[depth == "Both", var_lev := "time"]
+
+gtvar1 <- brm(cv_medage | trunc(lb = 0) ~ Reef_ID, data = subset(cv_all, !is.na(cv_all$Reef_ID)), family = gaussian, cores = 4, control = list(adapt_delta = 0.8, max_treedepth = 10), iter = 3000, warmup = 1000, chains = 4, thin = 3, backend = "cmdstanr", threads = threading(2))
+
+gtvar1b <- brm(cv_medage ~ Reef_ID, data = subset(cv_all, !is.na(cv_all$Reef_ID)), family = lognormal, cores = 4, control = list(adapt_delta = 0.8, max_treedepth = 10), iter = 3000, warmup = 1000, chains = 4, thin = 3, backend = "cmdstanr", threads = threading(2))
+
+gtvar2 <- brm(cv_medage ~ n, data = subset(cv_all, !is.na(cv_all$Reef_ID)), family = lognormal, cores = 4, control = list(adapt_delta = 0.8, max_treedepth = 10), iter = 3000, warmup = 1000, chains = 4, thin = 3, backend = "cmdstanr", threads = threading(2))
+
+gtvar3 <- brm(cv_medage ~ depth, data = subset(cv_all, !is.na(cv_all$Reef_ID)), family = lognormal, cores = 4, control = list(adapt_delta = 0.8, max_treedepth = 10), iter = 3000, warmup = 1000, chains = 4, thin = 3, backend = "cmdstanr", threads = threading(2))
+
+gtvar4 <- brm(cv_medage ~ Reef_ID + depth, data = subset(cv_all, !is.na(cv_all$Reef_ID)), family = lognormal, cores = 4, control = list(adapt_delta = 0.8, max_treedepth = 10), iter = 3000, warmup = 1000, chains = 4, thin = 3, backend = "cmdstanr", threads = threading(2))
+
+gtvar5 <- brm(meancv_medage ~ var_lev, data = cv_sandd, family = gaussian, cores = 4, control = list(adapt_delta = 0.8, max_treedepth = 10), iter = 3000, warmup = 1000, chains = 4, thin = 3, backend = "cmdstanr", threads = threading(2))
+
+#significant diff. between space and depth (time)
+gtvar5b <- brm(meancv_medage ~ var_lev, data = cv_sandd, family = lognormal, cores = 4, control = list(adapt_delta = 0.8, max_treedepth = 10), iter = 3000, warmup = 1000, chains = 4, thin = 3, backend = "cmdstanr", threads = threading(2))
+
+gtvar6 <- brm(meancv_medage ~ n, data = cv_sandd, family = lognormal, cores = 4, control = list(adapt_delta = 0.8, max_treedepth = 10), iter = 3000, warmup = 1000, chains = 4, thin = 3, backend = "cmdstanr", threads = threading(2))
+
+#significant
+gtvar7 <- brm(meancv_medage ~ Reef_ID, data = cv_sandd, family = lognormal, cores = 4, control = list(adapt_delta = 0.8, max_treedepth = 10), iter = 3000, warmup = 1000, chains = 4, thin = 3, backend = "cmdstanr", threads = threading(2))
+
+gtvar8 <- brm(meancv_medage ~ var_lev + (1 | Reef_ID:Loc_ID), data = cv_sandd, family = lognormal, cores = 4, control = list(adapt_delta = 0.8, max_treedepth = 10), iter = 3000, warmup = 1000, chains = 4, thin = 3, backend = "cmdstanr", threads = threading(2))
+
+gtvar8b <- brm(meancv_ta ~ var_lev + (1 | Reef_ID:Loc_ID), data = cv_sandd, family = lognormal, cores = 4, control = list(adapt_delta = 0.8, max_treedepth = 10), iter = 3000, warmup = 1000, chains = 4, thin = 3, backend = "cmdstanr", threads = threading(2))
+
+#This is reef-level, but I think I need locality or state-level
+gtvar8c <- brm(meancv_ta ~ var_lev + Reef_ID, data = cv_sandd, family = lognormal, cores = 4, control = list(adapt_delta = 0.8, max_treedepth = 10), iter = 3000, warmup = 1000, chains = 4, thin = 3, backend = "cmdstanr", threads = threading(2))
+
+gtvar9 <- brm(meancv_medage ~ var_lev + (1 + var_lev | Reef_ID:Loc_ID), data = cv_sandd, family = lognormal, cores = 4, control = list(adapt_delta = 0.99, max_treedepth = 15), iter = 3000, warmup = 1000, chains = 4, thin = 3, backend = "cmdstanr", threads = threading(2))
+
+gtvar10 <- brm(meancv_medage ~ var_lev + n + (1 + var_lev | Reef_ID:Loc_ID), data = cv_sandd, family = lognormal, cores = 4, control = list(adapt_delta = 0.99, max_treedepth = 15), iter = 3000, warmup = 1000, chains = 4, thin = 3, backend = "cmdstanr", threads = threading(2))
+
+#Was trying to get to a more granular level with these models, but I don't think this is actually what I want. I think gtvar8b is still the closest so far.
+Sampdat[, relyr := abs(Sample_median_age - max(Sample_median_age))]
+
+gtvar11 <- brm(Sample_median_age ~ 1, data = Sampdat, family = gaussian, cores = 4, control = list(adapt_delta = 0.8, max_treedepth = 10), iter = 3000, warmup = 1000, chains = 4, thin = 3, backend = "cmdstanr", threads = threading(2))
+
+gtvar12 <- brm(relyr ~ 1, data = Sampdat, family = gaussian, cores = 4, control = list(adapt_delta = 0.8, max_treedepth = 10), iter = 3000, warmup = 1000, chains = 4, thin = 3, backend = "cmdstanr", threads = threading(2))
+
+gtvar12b <- brm(relyr ~ 1, data = Sampdat, family = exgaussian, cores = 4, control = list(adapt_delta = 0.8, max_treedepth = 10), iter = 3000, warmup = 1000, chains = 4, thin = 3, backend = "cmdstanr", threads = threading(2))
+
+gtvar13 <- brm(relyr ~ Reef_ID + depth + Reef_ID:depth, data = Sampdat, family = exgaussian, cores = 4, control = list(adapt_delta = 0.8, max_treedepth = 10), iter = 3000, warmup = 1000, chains = 4, thin = 3, backend = "cmdstanr", threads = threading(2))
+
+
+sample1s <- HOBSdat[depth == "15-25cm", ]
+sample1s[Sample_corrected_posterior_age_estimate < 0, Sample_corrected_posterior_age_estimate := 0]
+
+samps <- unique(sample1s$Sample_ID)
+boot_cvs <- data.table(iter = integer(),
+                       locs_n = integer(),
+                       samps_n = integer(),
+                       locs = list(),
+                       samps = list(),
+                       cv_medage = numeric(),
+                       cv_ta = numeric())
+for(i in 1:10000){
+  s <- sample(samps, 3, replace = FALSE)
+  dat <- subset(sample1s, sample1s$Sample_ID %in% s)
+  cv_i <- data.table(iter = i,
+                   locs_n = length(unique(dat$Loc_ID)),
+                   samps_n = length(unique(dat$Sample_ID)),
+                   locs = list(unique(dat$Loc_ID)),
+                   samps = list(unique(dat$Sample_ID)),
+                   cv_medage = cv(dat$Sample_median_age),
+                   cv_ta = cv(dat$Sample_corrected_posterior_age_estimate))
+  boot_cvs <- rbind(boot_cvs, cv_i)
+}
+
+ggplot(boot_cvs) +
+  geom_density(aes(x = cv_medage), fill = "dodgerblue", color = "black") +
+  geom_vline(xintercept = 0.87, color = "red") +
+  theme_bw()
+
+ggplot(boot_cvs) +
+  geom_density(aes(x = cv_ta), fill = "forestgreen", color = "black") +
+  geom_vline(xintercept = 1.07, color = "red") +
+  theme_bw()
+
+
+#Try ensuring that all three samples selected are from different localities to see how the removal of short distances affects results
+locs <- unique(sample1s$Loc_ID)
+boot_cvs2 <- data.table(iter = integer(),
+                       locs_n = integer(),
+                       samps_n = integer(),
+                       locs = list(),
+                       samps = list(),
+                       cv_medage = numeric(),
+                       cv_ta = numeric())
+for(i in 1:10000){
+  rloc <- sample(locs, 3, replace = FALSE)
+  s <- vector()
+  for(l in rloc){
+    s_l <- sample(subset(sample1s, sample1s$Loc_ID == l)$Sample_ID, 1, replace = FALSE)
+    s <- append(s, s_l)
+  }
+  dat <- subset(sample1s, sample1s$Sample_ID %in% s)
+  cv_i <- data.table(iter = i,
+                   locs_n = length(unique(dat$Loc_ID)),
+                   samps_n = length(unique(dat$Sample_ID)),
+                   locs = list(unique(dat$Loc_ID)),
+                   samps = list(unique(dat$Sample_ID)),
+                   cv_medage = cv(dat$Sample_median_age),
+                   cv_ta = cv(dat$Sample_corrected_posterior_age_estimate))
+  boot_cvs2 <- rbind(boot_cvs2, cv_i)
+}
+
+cols <- c("Selection method 1" = "dodgerblue", "Selection method 2" = "purple", "Ritter et al. (2017)" = "red")
+lines <- c("Median CV" = 5, "Mean CV" = 3))
+
+ggplot() +
+  geom_density(data = boot_cvs, aes(x = cv_medage, fill = "Selection method 1"), color = "black", alpha = 0.5) +
+  geom_density(data = boot_cvs2, aes(x = cv_medage, fill = "Selection method 2"), color = "black", alpha = 0.3) +
+  geom_vline(aes(xintercept = median(boot_cvs$cv_medage), color = "Selection method 1", lty = "Median CV"), lwd = 1) +
+  geom_vline(aes(xintercept = median(boot_cvs2$cv_medage), color = "Selection method 2", lty = "Median CV"), lwd = 1) +
+  geom_vline(aes(xintercept = mean(boot_cvs$cv_medage), color = "Selection method 1", lty = "Mean CV"), lwd = 1) +
+  geom_vline(aes(xintercept = mean(boot_cvs2$cv_medage), color = "Selection method 2", lty = "Mean CV"), lwd = 1) +
+  geom_vline(aes(xintercept = 0.87, color = "Ritter et al. (2017)", lty = "CV"), lwd = 1) +
+  scale_color_manual(breaks = c("Selection method 1", "Selection method 2", "Ritter et al. (2017)"),
+                     values = c("Selection method 1" = "dodgerblue", "Selection method 2" = "purple", "Ritter et al. (2017)" = "red")) +
+  scale_fill_manual(breaks = c("Selection method 1", "Selection method 2"),
+                     values = c("Selection method 1" = "dodgerblue", "Selection method 2" = "purple")) +
+  scale_linetype_manual(breaks = c("Median CV", "Mean CV", "CV"),
+                        values = c("Median CV" = 5, "Mean CV" = 3, "CV" = 1)) +
+  theme_bw()
+
+ggplot() +
+  geom_density(data = boot_cvs, aes(x = cv_ta), fill = "forestgreen", color = "black", alpha = 0.5) +
+  geom_density(data = boot_cvs2, aes(x = cv_ta), fill = "orange2", color = "black", alpha = 0.3) +
+  geom_vline(xintercept = median(boot_cvs$cv_ta), color = "forestgreen") +
+  geom_vline(xintercept = median(boot_cvs2$cv_ta), color = "orange2") +
+  geom_vline(xintercept = mean(boot_cvs$cv_ta), color = "darkgreen", lty = 2) +
+  geom_vline(xintercept = mean(boot_cvs2$cv_ta), color = "orange4", lty = 2) +
+  geom_vline(xintercept = 1.07, color = "red") +
+  theme_bw()
+
+ggplot() +
+  geom_density(data = boot_cvs, aes(x = cv_ta, fill = "Selection method 1"), color = "black", alpha = 0.5) +
+  geom_density(data = boot_cvs2, aes(x = cv_ta, fill = "Selection method 2"), color = "black", alpha = 0.3) +
+  geom_vline(aes(xintercept = median(boot_cvs$cv_ta), color = "Selection method 1", lty = "Median CV"), lwd = 1) +
+  geom_vline(aes(xintercept = median(boot_cvs2$cv_ta), color = "Selection method 2", lty = "Median CV"), lwd = 1) +
+  geom_vline(aes(xintercept = mean(boot_cvs$cv_ta), color = "Selection method 1", lty = "Mean CV"), lwd = 1) +
+  geom_vline(aes(xintercept = mean(boot_cvs2$cv_ta), color = "Selection method 2", lty = "Mean CV"), lwd = 1) +
+  geom_vline(aes(xintercept = 1.07, color = "Ritter et al. (2017)", lty = "CV"), lwd = 1) +
+  scale_color_manual(breaks = c("Selection method 1", "Selection method 2", "Ritter et al. (2017)"),
+                     values = c("Selection method 1" = "forestgreen", "Selection method 2" = "orange2", "Ritter et al. (2017)" = "red")) +
+  scale_fill_manual(breaks = c("Selection method 1", "Selection method 2"),
+                     values = c("Selection method 1" = "forestgreen", "Selection method 2" = "orange2")) +
+  scale_linetype_manual(breaks = c("Median CV", "Mean CV", "CV"),
+                        values = c("Median CV" = 5, "Mean CV" = 3, "CV" = 1)) +
+  theme_bw()
+
+
+
+
+
+
+
+corrs <- data.table(Loc_ID = as.character(), r_pearson = as.numeric(), pval = as.numeric(), labx = as.numeric(), laby = as.numeric())
+for(i in unique(Sampdat$Loc_ID)){
+  dat <- subset(Sampdat, Sampdat$Loc_ID == i)
+  corr <- data.table(Loc_ID = i,
+                     r_pearson = cor.test(dat$Sample_median_age, dat$Sample_corrected_posterior_age_estimate)$estimate[[1]],
+                     pval = cor.test(dat$Sample_median_age, dat$Sample_corrected_posterior_age_estimate)$p.value,
+                     labx = min(dat$Sample_median_age) + (max(dat$Sample_median_age) - min(dat$Sample_median_age))/2.25,
+                     laby = ifelse(max(dat$Sample_corrected_posterior_age_estimate) > max(predict(lm(dat$Sample_corrected_posterior_age_estimate ~ dat$Sample_median_age), interval = "confidence")[,3]), max(dat$Sample_corrected_posterior_age_estimate) + max(dat$Sample_corrected_posterior_age_estimate)/3.75, max(predict(lm(dat$Sample_corrected_posterior_age_estimate ~ dat$Sample_median_age), interval = "confidence")[,3]) + max(predict(lm(dat$Sample_corrected_posterior_age_estimate ~ dat$Sample_median_age), interval = "confidence")[,3])/3.75))
+  corrs <- rbind(corrs, corr)
+}
+corrs[, labs := paste0("r = ", round(r_pearson, 3), ", p = ", format(round(pval, 4), scientific = FALSE))]
+corrs[Loc_ID == "JI-WC", Loc_ID := "JI"]
+Sampdat[Loc_ID == "JI-WC", Loc_ID := "JI"]
+
+##############################################################################
+##############################################################################
+#I think regressions of median age against CPE should be major axis regression instead of SLR, so I've copied this code from earlier to help.
+
+AgevTAmods <- data.table(Loc_ID = as.character(),
+                         r = as.numeric(),
+                         MVnorm_skewness = as.numeric(),
+                         MVnorm_kurtosis = as.numeric(),
+                         MVnorm_e = as.numeric(),
+                         method = as.character(),
+                         intercept = as.numeric(),
+                         intercept_low = as.numeric(),
+                         intercept_high = as.numeric(),
+                         slope = as.numeric(),
+                         slope_low = as.numeric(),
+                         slope_high = as.numeric(),
+                         angle = as.numeric(),
+                         pval = as.numeric())
+Locs <- unique(Sampdat$Loc_ID)
+for(i in Locs){
+  dat <- subset(Sampdat, Sampdat$Loc_ID == i)
+  if(min(dat$Sample_corrected_posterior_age_estimate) < 0){dat[Sample_corrected_posterior_age_estimate < 0, Sample_corrected_posterior_age_estimate := 0]}
+  AgevTAmod <- lmodel2(Sample_corrected_posterior_age_estimate ~ Sample_median_age, data = dat, range.y = "relative", range.x = "relative", nperm = 1000)
+  regres <- AgevTAmod$regression.results
+  regres_sma <- subset(regres, regres$Method == "SMA")
+  names(regres_sma) <- c("method", "intercept", "slope", "angle", "pval")
+  CIs <- AgevTAmod$confidence.intervals
+  CIs_sma <- subset(CIs, CIs$Method == "SMA")
+  names(CIs_sma) <- c("method", "intercept_low", "intercept_high", "slope_low", "slope_high")
+  mvnorm_dat <- dat[, c("Sample_median_age", "Sample_corrected_posterior_age_estimate")]
+  mvnorm <- QuantPsyc::mult.norm(mvnorm_dat)$mult.test
+  mvnorm2 <- energy::mvnorm.etest(mvnorm_dat, R=100)
+  AgevTAmodres <- data.table(Loc_ID = i,
+                             r = AgevTAmod[[8]],
+                             MVnorm_skewness = mvnorm[5],
+                             MVnorm_kurtosis = mvnorm[6],
+                             MVnorm_e = mvnorm2[[2]],
+                             method = regres_sma$method[[1]],
+                             intercept = regres_sma$intercept[[1]],
+                             intercept_low = CIs_sma$intercept_low[[1]],
+                             intercept_high = CIs_sma$intercept_high[[1]],
+                             slope = regres_sma$slope[[1]],
+                             slope_low = CIs_sma$slope_low[[1]],
+                             slope_high = CIs_sma$slope_high[[1]],
+                             angle = regres_sma$angle[[1]],
+                             pval = regres_sma$pval[[1]])
+  AgevTAmods <- rbind(AgevTAmods, AgevTAmodres)
+}
+
+#I abandoned this approach after reading some of the vignette("mod2user") because it said that the major axis regression models implemented by lmodel2() assume that the variables have a bivariate normal distribution and the data for many of our localities do not according to the tests I found here (https://www.statology.org/multivariate-normality-test-r/). The test results on each graph in figures 17 and 19 are Pearson correlation test results.
+
+###################################################################################
+###################################################################################
+
+png(file = here::here(paste0("HOBS_geochronology_ms2/Figures/HOBS_geochron_Fig17_", Sys.Date(), ".png")), width = 2000, height = 2300, res = 275)
+ggplot(Sampdat, aes(x = Sample_median_age, y = Sample_corrected_posterior_age_estimate, fill = Loc_ID, shape = depth)) +
+  geom_point(size = 2, color = "black") +
+  #geom_smooth(aes(x = Sample_median_age, y = Sample_corrected_posterior_age_estimate), method = "lm", colour = "grey25", size = 0.65, inherit.aes = FALSE) +
+  geom_text(data = corrs, aes(label = labs, x = labx, y = laby - laby/12), size = 3.5, inherit.aes = FALSE) +
+  theme_bw() +
+  scale_fill_brewer(palette = "Paired") +
+  facet_wrap(~Loc_ID, ncol = 3, scales = "free") +
+  #coord_cartesian(xlim = c(1950, 2020)) +
+  labs(x = 'Median est. age',
+       y = 'Time averaging est. (CPE)',
+       fill = 'Locality',
+       shape = "Burial depth") +
+  scale_shape_manual(values = c(21, 22)) +
+  guides(fill=guide_legend(override.aes=list(shape=21)))
+dev.off()
+
+corrs2 <- data.table(Loc_ID = as.character(), r_pearson = as.numeric(), pval = as.numeric(), labx = as.numeric(), laby = as.numeric())
+for(i in unique(Sampdat$Loc_ID)){
+  dat <- subset(Sampdat, Sampdat$Loc_ID == i)
+  corr <- data.table(Loc_ID = i,
+                     r_pearson = cor.test(dat$Sample_n, dat$Sample_corrected_posterior_age_estimate)$estimate[[1]],
+                     pval = cor.test(dat$Sample_n, dat$Sample_corrected_posterior_age_estimate)$p.value,
+                     labx = min(dat$Sample_n) + (max(dat$Sample_n) - min(dat$Sample_n))/2.25,
+                     laby = ifelse(max(dat$Sample_corrected_posterior_age_estimate) > max(predict(lm(dat$Sample_corrected_posterior_age_estimate ~ dat$Sample_n), interval = "confidence")[,3]), max(dat$Sample_corrected_posterior_age_estimate) + max(dat$Sample_corrected_posterior_age_estimate)/3.75, max(predict(lm(dat$Sample_corrected_posterior_age_estimate ~ dat$Sample_n), interval = "confidence")[,3]) + max(predict(lm(dat$Sample_corrected_posterior_age_estimate ~ dat$Sample_n), interval = "confidence")[,3])/3.75))
+  corrs2 <- rbind(corrs2, corr)
+}
+corrs2[, labs := paste0("r = ", round(r_pearson, 3), ", p = ", format(round(pval, 4), scientific = FALSE))]
+
+png(file = here::here(paste0("HOBS_geochronology_ms2/Figures/HOBS_geochron_Fig19_", Sys.Date(), ".png")), width = 2000, height = 2300, res = 275)
+ggplot(Sampdat, aes(x = Sample_n, y = Sample_corrected_posterior_age_estimate, fill = Loc_ID, shape = depth)) +
+  geom_point(size = 2, color = "black") +
+  #geom_smooth(aes(x = Sample_n, y = Sample_corrected_posterior_age_estimate), method = "lm", colour = "grey25", size = 0.65, inherit.aes = FALSE) +
+  geom_text(data = corrs2, aes(label = labs, x = labx, y = laby - laby/12), size = 3.5, inherit.aes = FALSE) +
+  theme_bw() +
+  scale_fill_brewer(palette = "Paired") +
+  facet_wrap(~Loc_ID, ncol = 3, scales = "free") +
+  #coord_cartesian(xlim = c(1950, 2020)) +
+  labs(x = 'Number of specimens dated',
+       y = 'Time averaging est. (CPE)',
+       fill = 'Locality',
+       shape = "Burial depth") +
+  scale_shape_manual(values = c(21, 22)) +
+  guides(fill=guide_legend(override.aes=list(shape=21)))
+dev.off()
+
+```
+
+```{r EPDsbyHoleCode, eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+
+## From script written by Matt Kosnik for our pilot LP14C data
+## clear out the really 0 probability ages
+posteriors <- posteriors[(posteriors$probability > 0),]
+MKetal_posteriors <- MKetal_posteriors[(MKetal_posteriors$Probability > 0),]
+
+## check to see what the probabilities sum to 1 (they do not)
+( cSum <- aggregate(probability ~ name, data=posteriors, FUN=sum) )
+( cSum2 <- aggregate(Probability ~ Specimen, data=MKetal_posteriors, FUN=sum) )
+
+## make the probabilities for each specimen sum to 1
+## all these are half year probabilities so can all get uniformly scaled
+posteriors2 <- merge(posteriors,cSum, by='name')
+posteriors2$aProb <- posteriors2$probability.x/posteriors2$probability.y
+
+MKetal_posteriors2 <- merge(MKetal_posteriors, cSum2, by='Specimen')
+MKetal_posteriors2$aProb <- MKetal_posteriors2$Probability.x/MKetal_posteriors2$Probability.y
+
+## check to see what the probabilies sum to 1
+( cSum <- aggregate(aProb ~ name, data=posteriors2, FUN=sum) )
+( cSum2 <- aggregate(aProb ~ Specimen, data=MKetal_posteriors2, FUN=sum) )
+
+posteriors2[ , HoleID := sub("S[^S]+$", "", name)]
+posteriors2[ , HoleID := str_replace(HoleID, "-WC", "")]
+specsum[ , HoleID := sub("S[^S]+$", "", name)]
+specsum[ , HoleID := str_replace(HoleID, "-WC", "")]
+Sampdat[ , HoleID := sub("S[^S]+$", "", Sample_ID)]
+Sampdat[ , HoleID := str_replace(HoleID, "-WC", "")]
+
+L1 <- subset(posteriors2, posteriors2$depth == "15-25cm")
+L2 <- subset(posteriors2, posteriors2$depth == "25-35cm")
+
+#Posterior distributions by HoleID
+holes <- unique(Sampdat$HoleID)
+orders <- rep(c("a","b","c","d","e","f","g","h","i","j"), each = 9)
+for(i in unique(posteriors2$HoleID)){
+plot <- ggplot(NULL, aes(x = value_bp, y = aProb, group = name)) +
+  geom_hline(yintercept = 0, color = 'grey', size = 0.5) +
+  geom_area(data = subset(L1, L1$HoleID == i), aes(y = aProb, fill = depth), position = 'identity', alpha = 0.45, color = "black", size = 0.5) + 
+  geom_area(data = subset(L2, L2$HoleID == i), aes(y = aProb, fill = depth), position = 'identity', alpha = 0.45, color = "black", size = 0.5) +
+  geom_point(data = subset(specsum, specsum$HoleID == i), aes(x = median_age_bp, y = 1-(1+(max(subset(posteriors2, posteriors2$HoleID == i)$aProb)/20)), fill = depth), color = 'black', stroke = 0.6, size = 3, shape = 24) +
+  scale_fill_brewer(palette = 'Dark2') +
+  scale_color_brewer(palette = 'Dark2') +
+  theme_bw() +
+  #facet_wrap(~factor(HoleID), ncol = 3, scales = "free") +
+  #facet_grid(rows = vars(loc)) +
+  scale_x_reverse() +
+  #xlim(60, 0) +
+  labs(x = 'Age (yr)',
+       y = 'Annual probability',
+       fill = 'Burial depth',
+       title = paste0(i, ", PRI station ", subset(Sampdat, Sampdat$HoleID == i)$PRI_station)) + 
+  theme(panel.grid.major = element_line(linetype = "blank"), 
+        panel.grid.minor = element_line(linetype = "blank"),
+        axis.text = element_text(size = fontsize),
+        axis.title = element_text(size = fontsize),
+        legend.text = element_text(size = fontsize), 
+        legend.title = element_text(size = fontsize),
+        plot.title = element_text(face = "bold", vjust = 0, size = fontsize), 
+        panel.background = element_rect(fill = NA))
+file_name = here::here(paste0("HOBS_Geochronology_ms2/KableTest/", orders[which(holes == i)], which(holes == i), ".png"))
+png(file_name, width = 2000, height = 1200, res = 275)
+print(plot)
+dev.off()
+}
+
+
+vlines2 <- data.frame(xint = c(median(subset(sampsum, sampsum$depth == "15-25")$median_age_bp), 
+                              median(subset(sampsum, sampsum$depth == "25-35")$median_age_bp)), 
+                     depth = c('15-25cm', '25-35cm'))
+
+#Time-averaging by median sample age (True sample version)
+
+Ketal <- data.frame(median_age_bp = 1058, Sample_corrected_posterior_age_estimate = 1830)
+label1 <- c(expression(atop(NA, atop(textstyle('Kowalewski et al. 2018'), 
+                                     textstyle(paste('(', italic('Tucetona pectinata'), ')'))))))
+
+Detal <- data.frame(median_age_bp = c(123, 283, 146, 148, 160, 2043), 
+                    Sample_corrected_posterior_age_estimate = c(68, 2670, 16, 27, 16, 1937))
+label2 <- c(expression(atop(NA, atop(textstyle('Dominguez et al. 2016'), 
+                                     textstyle(paste('(', italic('Fulvia tenuicostata'), ')'))))))
+
+Retal <- data.frame(median_age_bp = c(2658, 1318, 230),
+                       Sample_corrected_posterior_age_estimate = c(1251, 490, 14))
+label3 <- c(expression(atop(NA, atop(textstyle('Ritter et al. 2017'), 
+                                     textstyle(paste('(', italic('Mactra sp.'), ')'))))))
+
+png(file = here::here(paste0("HOBS_geochronology_ms2/Figures/HOBS_geochron_Fig18_", Sys.Date(), ".png")), width = 2500, height = 2000, res = 275)
+ggplot(sampsum, aes(x = median_age_bp, y = Sample_corrected_posterior_age_estimate)) +
+  theme_classic() +
+  scale_fill_brewer(palette = 'Dark2') +
+  scale_color_brewer(palette = 'Dark2') +
+  geom_hline(yintercept = c(1, 10, 100, 1000)) +
+  geom_vline(data = vlines2, aes(xintercept = xint, color = depth), show.legend = FALSE) +
+  geom_point(aes(fill = depth, shape = "This study"), color = "black", size = 3) +
+  geom_point(data = Ketal, aes(shape = "Kowalewski et al. (2018)"), fill = 'dark grey', color = 'black', size = 3) +
+  #annotate('text', x = Ketal$median_age_bp[1] - 250, y = Ketal$Sample_corrected_posterior_age_estimate[1] + 1500, 
+  #         label = label1) +
+  geom_point(data = Detal, aes(shape = "Dominguez et al. (2016)"), fill = 'dark grey', color = 'black', size = 3) +
+  #annotate('text', x = Detal$median_age_bp[6] - 250, y = Detal$Sample_corrected_posterior_age_estimate[6] + 1700, 
+  #         label = label2) +
+  geom_point(data = Retal, aes(shape = "Ritter et al. (2017)"), fill = 'dark grey', color = 'black', size = 3) +
+  scale_y_continuous(trans='log10') +
+  scale_x_reverse() +
+  labs(x = 'Median age (bp)',
+       y = 'Corrected posterior age estimate (yr)',
+       fill = 'Burial depth (cm)',
+       shape = "") + 
+  scale_shape_manual(values = c("This study" = 21, "Kowalewski et al. (2018)" = 22, "Dominguez et al. (2016)" = 23, "Ritter et al. (2017)" = 24),
+                     breaks = c("This study", "Dominguez et al. (2016)", "Ritter et al. (2017)", "Kowalewski et al. (2018)")) +
+  guides(fill=guide_legend(override.aes=list(shape=21))) +
+  theme(axis.title = element_text(size = 12), axis.text = element_text(size = 12, colour = "black"), 
+        legend.text = element_text(size = 12), legend.title = element_text(size = 12)) #+
+  #coord_cartesian(xlim = c(200, 0))
+dev.off()
+```
+
+```{r TAFacetCode, eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+
+#Boxplots of median sample ages and time-averaging
+sampsum[ , locality := str_replace(sample, "_R.H.S.", "")]
+sampsum[ , locality := str_replace(locality, "JI-WC", "JI")]
+sampsum$reefID <- paste0(sampsum$locality, " R", sampsum$reef)
+sampsum$holeID <- stringr::str_extract(sampsum$sample, ".._R.H.")
+sampsum$holeN <- stringr::str_extract(sampsum$holeID, "R.H.")
+sampsum$holeN <- stringr::str_extract(sampsum$holeN, "H.")
+sampsum$holeN2 <- str_replace(sampsum$holeN, "H", "Sample hole ")
+sampsum$holeN3 <- str_replace(sampsum$holeN, "H", "Hole ")
+sampsum$median_age_bp <- abs(sampsum$Sample_median_age - 2019)
+sampsum[ , `:=` (hliney = as.numeric(), nlaby = as.numeric(), ylim_high = as.numeric(), ylim_low = as.numeric())]
+
+for(i in unique(sampsum$reefID)){
+  sampsum[reefID == i, hliney := min(ifelse(median_age_bp - (Sample_corrected_posterior_age_estimate/2) < 0, 0, 
+                                            median_age_bp - (Sample_corrected_posterior_age_estimate/2)))]
+  sampsum[reefID == i, maxval := max(ifelse(median_age_bp - (Sample_corrected_posterior_age_estimate/2) < 0, 
+                                                   Sample_corrected_posterior_age_estimate, 
+                                                   median_age_bp + (Sample_corrected_posterior_age_estimate/2)))]
+  sampsum[reefID == i, laby := hliney - ((maxval - hliney)/6.625)]
+  sampsum[reefID == i, ylim_high := maxval + (((maxval - hliney)/6.625)/15)]
+  sampsum[reefID == i, ylim_low := laby - (((maxval - hliney)/6.625)/2.5)]
+}
+
+sampsum[, depth := str_extract(depth, "..-..")]
+
+hlines <- copy(sampsum[, .(locality, reefID, hliney)])
+nequal <- copy(sampsum[, .(locality, reefID, laby)])
+
+#Function to shift the legend of the plot below into a blank facet panel. Credit: https://stackoverflow.com/questions/54438495/shift-legend-into-empty-facets-of-a-faceted-plot-in-ggplot2
+#I tried for a long time to combine this function with the process of color-coding the facet strips by locality (see below), but I couldn't figure it out and eventually just needed to move on. If it could work, it would be a great solution to fitting these plots on the page, but I think color coding the headings is ultimately more useful to the reader, so I kept that feature.
+shift_legend3 <- function(p) {
+    pnls <- cowplot::plot_to_gtable(p) %>% gtable::gtable_filter("panel") %>%
+      with(setNames(grobs, layout$name)) %>% purrr::keep(~identical(.x,zeroGrob()))
+
+    if( length(pnls) == 0 ) stop( "No empty facets in the plot" )
+
+    lemon::reposition_legend( p, "center", panel=names(pnls) )
+}
+
+Group14 <- c("BH", "GI-EC", "GR", "HC-MC", "JI", "LB")
+Group15 <- c("LC", "LSG", "MR", "NP", "PC")
+
+#Change to the group of localites for the figure you want to produce (14 or 15).
+group <- Group14
+
+png(file = here::here(paste0("HOBS_geochronology_ms2/Figures/HOBS_geochron_Fig", ifelse(Group14 %in% group, "14_", "15_"), Sys.Date(), ".png")), width = 2000, height = 2300, res = 275)
+test <- ggplot(subset(sampsum, sampsum$locality %in% group), aes(x = depth, y = median_age_bp, color = holeN3)) +
+  theme_classic() +
+  scale_color_brewer(palette = 'Dark2') +
+  geom_hline(data = subset(hlines, hlines$locality %in% group), aes(yintercept = hliney), color = "grey60", lwd = 0.25) +
+  geom_errorbar(aes(ymin = ifelse(median_age_bp - (Sample_corrected_posterior_age_estimate/2) < 0, 0, median_age_bp - (Sample_corrected_posterior_age_estimate/2)), 
+                    ymax = ifelse(median_age_bp - (Sample_corrected_posterior_age_estimate/2) < 0, Sample_corrected_posterior_age_estimate, median_age_bp + (Sample_corrected_posterior_age_estimate/2))),
+                position = position_dodge(width = 0.5), width = 0.3, key_glyph = "rect") +
+  geom_point(position = position_dodge(width = 0.5), key_glyph = "rect") +
+  geom_text(aes(label = Sample_n, x = depth, y = laby, color = holeN3), position = position_dodge(width = 0.5), key_glyph = "rect", size = 3.5) +
+  geom_text(aes(label = "n=", x = 0.6, y = laby), color = "grey10", size = 3.5) +
+  #annotate("text", x = 0.5, y = unique(sampsum$laby), label = "n =", color = "black") +
+  geom_point(aes(x = NA, y = ylim_low)) +
+  geom_point(aes(x = NA, y = ylim_high)) +
+  #ylim(0, 60) +
+  facet_wrap(~reefID, ncol = 3, scales = "free") +
+  labs(x = 'Burial depth (cm)',
+       y = 'Median age (bp)', #) +
+       color = 'Sample\nhole') +
+  theme(axis.line = element_line(),
+        #axis.text = element_text(size = fontsize),
+        #axis.title = element_text(size = fontsize),
+        #legend.text = element_text(size = fontsize), 
+        #legend.title = element_blank(),
+        #plot.title = element_text(face = "bold", vjust = 0, size = fontsize),
+        #text = element_text(size = 13.5),
+        panel.background = element_rect(fill = NA))
+#test <- shift_legend3(test)
+
+#The following code is a solution for color-coding strip headers according to a variable (locality, in this case). Source: https://stackoverflow.com/questions/19440069/ggplot2-facet-wrap-strip-color-based-on-variable-in-data-set
+#Note additional work is probably needed on color selection. Source here recommended colorspace package: https://www.nceas.ucsb.edu/sites/default/files/2020-04/colorPaletteCheatsheet.pdf
+dummy <- ggplot(data = subset(sampsum, sampsum$locality %in% group), aes(x = depth, y = median_age_bp))+ facet_wrap(~reefID, ncol = 3) + 
+  geom_rect(aes(fill=locality), xmin=-Inf, xmax=Inf, ymin=-Inf, ymax=Inf) +
+  scale_fill_brewer(palette = "Spectral") +
+  theme_minimal()
+
+g1 <- ggplotGrob(test)
+#g1 <- shift_legend3(test)
+
+g2 <- ggplotGrob(dummy)
+#g2 <- shift_legend3(dummy)
+
+gtable_select <- function (x, ...) 
+{
+  matches <- c(...)
+  x$layout <- x$layout[matches, , drop = FALSE]
+  x$grobs <- x$grobs[matches]
+  x
+}
+
+panels <- grepl(pattern="panel", g2$layout$name)
+strips <- grepl(pattern="strip_t", g2$layout$name)
+g2$layout$t[panels] <- g2$layout$t[panels] - 1
+g2$layout$b[panels] <- g2$layout$b[panels] - 1
+
+stript <- grepl(pattern="strip-t", g2$layout$name)
+
+new_strips <- gtable_select(g2, panels | strips | stript)
+grid.newpage()
+grid.draw(new_strips)
+
+gtable_stack <- function(g1, g2){
+  g1$grobs <- c(g1$grobs, g2$grobs)
+  g1$layout <- transform(g1$layout, z= z-max(z), name="g2")
+  g1$layout <- rbind(g1$layout, g2$layout)
+  g1
+}
+#g1 <- shift_legend3(g1)
+
+## ideally you'd remove the old strips, for now they're just covered
+new_plot <- gtable_stack(g1, new_strips)
+grid.newpage()
+grid.draw(new_plot)
+
+dev.off()
+```
+
+
+DISCUSSION
+==========
+
+The oyster death assemblages sampled for this study preserved specimens which were both more recent and less time-averaged than almost any other type of molluscan death assemblage studied to-date [@flessaTimeTaphonomyQuantitative1993; @meldahlTimeaveragingPostmortemSkeletal1997; @kowalewskiHighresolutionEstimatesTemporal1998; @kosnikTaphonomicBiasTimeaveraging2009; @krauseQuantitativeComparisonsModels2010; @dexterContinuousMultimillennialRecord2014; @kosnikSedimentAccumulationStratigraphic2015; @dominguezTimeaveragingStratigraphicResolution2016; @ritterSpatialVariationTemporal2017; @kowalewskiOneFossilRecord2018; @albanoRadiocarbonDatingSupports2020; see additional studies summarized in Table 1 of @kidwellTimeaveragingFidelityModern2013]. Among the small number of recent studies that used similar methods to quantify the scale of time-averaging in their samples, the _C. virginica_ death assemblages had the most recent median estimated ages by about 100 years and over half of our samples also had lower corrected posterior age estimates, some by an order of magnitude or more (Figure \@ref(fig:AgevTAplot-all)). For instance, Dominguez et al. [-@dominguezTimeaveragingStratigraphicResolution2016] documented decadal-scales of time averaging (approximately 20-40 years) in some of their samples collected from Sydney Harbour, New South Wales, Australia, using shells of the bivalve _Fulvia tenuicostata_, but the median estimated ages for those samples were approximately 150 years. The authors hypothesized a 20^th^-century decline in production by _F. tenuicostata_ to explain the lack of more recent shells in their samples, but a similar pattern was observed in the youngest sample from a study of time-averaging in molluscan death assemblages from the Southern Brazilian Shelf that dated shells of the bivalve _Mactra_ sp. [@ritterSpatialVariationTemporal2017]. Ritter et al. [-@ritterSpatialVariationTemporal2017] documented a scale of time averaging of < 15 years at their youngest site, which did yield some shells with modern ages, but the median estimated age for the assemblage was ~230 years. In contrast, corrected posterior age estimates across all of the _C. virginica_ samples in our study had a median value of 10 years (ranging from zero to 403 years) and the median estimated ages across all of the samples from the 15-25cm and 25-35cm burial depths were approximately 22 years and 33 years, respectively. Even the total age variability values, which include both age-estimation error and variability due to time-averaging, compare favorably with the other studies' time-averaging estimates (median IQR~TAV~ = ~14 years with a range from two to 482 years). These results support our prediction that the physical structure of oyster reefs prevents the same degree of stratigraphic mixing that commonly occurs in other types of mollusk death assemblages and suggest a generally high burial rate of shell on oyster reefs; factors which produce relatively high-resolution geohistorical records.
+
+Geographic variability too, although substantial, was often less in the oyster reefs we sampled than has been found for other mollusk death assemblages, especially for the median estimated ages. For instance, Ritter et al. [-@ritterSpatialVariationTemporal2017] took three samples tens of kilometers apart and at different depths on the Southern Brazilian shelf to examine the spatial variability in shell ages and time-averaging in _Mactra_ sp. death assemblages and found median estimated ages of 2658, 1318 and 230 years, with associated time averaging estimates of 1251, 490 and 14 years, respectively. The coefficients of variation for median estimated age and time-averaging in this case were `r round(sd(c(2658, 1318, 230))/mean(c(2658, 1318, 230)), 2)` and `r round(sd(c(1251, 490, 14))/mean(c(1251, 490, 14)), 2)`, respectively. The former is much larger than the largest coefficient of variation for median estimated age across all of the _C. virginica_ samples and the latter value is comparable with the median coefficient of variation of the _C. virginica_ sample corrected posterior estimates grouped by locality and burial depth (Figure \@ref(fig:CVplot)). However, the coefficient of variation tends to increase as the number of samples included in the calculation increases (Figure \@ref(fig:CVplot2)). When the coefficient of variation of the time-averaging estimates from Ritter et al. [-@ritterSpatialVariationTemporal2017] are compared with the distribution of coefficients of variation of time averaging estimates from the _C. virginica_ samples from a single burial depth and including comparable numbers of samples (i.e., n = 3), the median coefficient of variation for the corrected posterior estimates is below 1 (Figure \@ref(fig:CVplot2)).
+
+Despite the evidence that oyster reef death assemblages generally are higher-resolution geohistorical records than other types of molluscan death assemblages, there was still considerable geographic variation, and even intra-assemblage variation, in the estimated median ages and scales of time averaging (Figures \@ref(fig:TAFacetPlot1), \@ref(fig:TAFacetPlot2)), precluding any useful generalizations of the results into regional or statewide guidance on age-burial depth relationships or scales of time-averaging. Age and time-averaging of a given sample are consequences of a complex interaction of factors that can vary on a local scale, including sedimentation rate, reef subsidence, rates of physical and chemical shell destruction on the reef, rates of shell mixing on the reef from storms or bioturbators such as stone crabs, as well as population demographics and recruitment dynamics of the living oyster population, which controls the addition of new shell to the assemblage [@bahrEcologyIntertidalOyster1981; @hargisChesapeakeOysterReefs1999; @powellRiseFallCrassostrea2012; @rodriguezOysterReefsCan2014]. These factors are spatially heterogeneous, even within particular reefs, and some of the impacts are apparent in the geochronological results. For instance, the reefs sampled at the Guana River locality tended to be more recent in age at both burial depths than most other localities (Figures \@ref(fig:TAFacetPlot1), \@ref(fig:TAFacetPlot2)), and these data are consistent with field observations that many Guana River reefs had high relief (~ 1 meter), vertically-oriented oyster clump growth and were covered with soft sediments. These observations indicate that the burial of oyster shell on the reefs at Guana River may be more rapid than the burial rate at reefs elsewhere in the state, some of which had lower reef heights, sandier, firmer sediments and broader or more spherical, dense oyster clump growth. Some reefs also showed multi-decadal variation in median estimated sample ages and/or time-averaging estimates from sample hole to sample hole, suggesting that rates of shell burial, mixing and/or destruction change over a fine spatial scale (Figures \@ref(fig:TAFacetPlot1), \@ref(fig:TAFacetPlot2)).
+
+Our findings demonstrate the importance of having specific geochronological information for developing applied conservation paleobiological studies. The age estimates for each sample will increase the utility of data collected from them for resource managers, who will be able to interpret them in temporal context with the more typical real-time data records. Accounting for age and time-averaging in the death assemblage samples also raises the possibility of ultimately integrating death assemblage and real-time data into single time-series analyses, instead of only focusing on more general "before/after" comparisons [e.g., @dietlGeohistoricalRecordsIndicate2016]. Specifically, the low decadal-scale time-averaging and generally very recent median estimated ages make these oyster death assemblage samples a very promising resource for decadal-scale oyster body size status and trend analyses for the FDEP SEACAR project. Most of the samples represent a relevant time-period for aquatic preserve management in Florida (i.e., post-1966) and will yield location-specific historical oyster body size data that would not be accessible any other way, given the lack of contemporaneous historical oyster monitoring records from most coastal areas of the state. Ultimately, this case study could support the expansion of historical oyster population monitoring using paleoecological techniques, and future work could include expanding the number of reef death assemblages sampled as well as extending some of the existing time series further into the past by sampling more deeply buried shells.
+
+Lastly, the results of our study have an important implication for paleoecological studies of mollusk assemblages. It has long been recognized that the scale(s) of time-averaging in an assemblage controls the temporal resolution of the record and determines the types of studies that are possible [@kowalewskiHighresolutionEstimatesTemporal1998; @kidwellImplicationsTimeaveragedDeath2013a]. For instance, paleoecological questions involving processes that operate on short (ecological) timespans, such as behavioral change over time on a local scale or interpretations of biogeographic patterns in response to relatively rapid environmental change, require lower time-averaging (higher temporal resolution) than studies of general biodiversity trends through time or of other processes that act on much longer timescales (e.g., Milankovitch cycles and climate). Given that oyster reefs and other types of reefs are sometimes preserved in the fossil record as _in situ_ bioherms (fossilized reefs), the results of our study may suggest that these records may be more appropriate for studying some ecological processes in the deep past than other types of fossil assemblages. Given the apparently limited mobility of shells preserved within the oyster reef death assemblages, it seems reasonable to assume that the degree of time-averaging would not dramatically increase over time in a bioherm relative to the death assemblage of a living oyster reef. If this assumption is true, bioherms may preserve decadal-scale stratigraphic records from time-periods when information at such a fine temporal resolution is exceptionally rare.
+
+DATA ACCESSIBILITY
+==================
+- All oyster specimen data collected for the historical oyster body size project as well as the data collection protocol are available in the SEACAR program database, the SEACAR Data Discovery Interface, at https://dev.seacar.waterinstitute.usf.edu/programs/details/5035.
+
+- All samples and individual specimens collected and analyzed for the historical oyster body size project are available from the Paleontological Research Institution (PRI) research collections. Each sample was assigned an international geosample number (see Table \@ref(tab:SampledatCode) or Table \@ref(tab:PRICatNos)), which can be used to identify the oyster death assemblage samples in both the PRI Research Collection Database (accessible from https://www.priweb.org/research-and-collections/research-collection) and the System for Earth Sample Registration (https://www.geosamples.org). Each oyster specimen dated for the current project was also assigned a PRI catalog number that can be used to identify the individual specimens in the PRI Research Collection Database (see Table \@ref(tab:PRICatNos)). For inquiries regarding access to these collections please contact the PRI Collections Manager (contact information available at the link above).
+
+ACKNOWLEDGMENTS
+===============
+We gratefully acknowledge funding from the National Oceanic and Atmospheric Administration through the Florida Coastal Management Program that supported this research. We also thank Jaleigh Pier who was the primary technical laboratory staff member on the project from the Paleontological Research Institution (PRI), Darrell Kaufman (Northern Arizona University), Jordon Bright (Northern Arizona University), and John Southon (University of California, Irvine) for handling the geochronological analyses and Quan Hua (Australian Nuclear Science and Technology Organisation) for running the radiocarbon age calibrations. D. Kaufman, J. Bright, and Q. Hua also advised the authors on the geochronology sampling plan and interpretation of the results. Thanks are also due our colleagues from the Florida Department of Environmental Protection (FDEP) Office of Resilience and Coastal Protection (RCP) and the Division of Recreation and Parks (DRP), the Florida Department of Agriculture and Consumer Services (FDACS), as well as the numerous state agency and PRI volunteers who assisted with the fieldwork or lab work for this project. State agency staff included Matthew Anderson (RCP), Pamela Benjasirichai (FDACS), Ethan Bourque (RCP), Mindy Brown (RCP), Caitlin Brunk (DRP), Chris Clark (FDACS), Steve Cofone (FDACS), Rebecca Cray (RCP), Emily Dark (RCP), Mark DeHaven (FDACS), Nikki Dix (RCP), Stephanie Erickson (RCP), Jillian Fleiger (FDACS), Jason Garwood (RCP), Trisha Green (RCP), Brooke Hamill (RCP), Kit Harshaw (FDACS), David Hersl (RCP), Timothy Jones (RCP), Kelsey Lang (RCP), Pamela Marcum (RCP), Mary McMurray (RCP), Ben Mowbray (RCP), Richard Noyes (RCP), and Rebecca Prado (RCP). Volunteers included Brian Alexander (RCP), Alicia Bishop (RCP), Siddharth Gavirneni (PRI), Chris Hormuth (RCP), Andrew McNeil (PRI), Morgan Melekos (PRI), Remo Mondazzi (RCP), Dustin Philipp (RCP), Emily Prest (PRI), Matthew Pruden (PRI), Marissa Raymond (RCP), Mason Schilling (RCP), Zachary Siper (PRI), Barbara Skoblick (PRI), Anna Thorsness (RCP), Dawn Thorsness (RCP), and Jonathan Valentine (Pelican Island National Wildlife Refuge).
+
+```{r EPDsbyHole-BH, echo=FALSE, message=FALSE, warning=FALSE, out.width = "50%", fig.show="hold", fig.cap="Radiocarbon age estimate empirical posterior distributions by sample hole for the Big Hickory locality in Estero Bay, Florida. Triangles below the x-axes show the median estimated age for each specimen dated from the sample(s) processed from each hole. BH = Big Hickory, R\\# = Reef number, H\\# = Sample hole number."}
+FigGraphs <- list.files(path = here::here("HOBS_geochronology_ms2/KableTest/"), pattern = ".png", full.names = TRUE)
+knitr::include_graphics(FigGraphs[1:8])
+```
+
+```{r EPDsbyHole-GIEC, echo=FALSE, message=FALSE, warning=FALSE, out.width = "50%", fig.show="hold", fig.cap="Radiocarbon age estimate empirical posterior distributions by sample hole for the Goose Island/East Cove locality in Apalachicola Bay, Florida. Triangles below the x-axes show the median estimated age for each specimen dated from the sample(s) processed from each hole. GI-EC = Goose Island/East Cove, R\\# = Reef number, H\\# = Sample hole number."}
+FigGraphs <- list.files(path = here::here("HOBS_geochronology_ms2/KableTest/"), pattern = ".png", full.names = TRUE)
+knitr::include_graphics(FigGraphs[9:14])
+```
+
+```{r EPDsbyHole-GR, echo=FALSE, message=FALSE, warning=FALSE, out.width = "33%", fig.show="hold", fig.cap="Radiocarbon age estimate empirical posterior distributions by sample hole for the Guana River locality in northeast Florida. Triangles below the x-axes show the median estimated age for each specimen dated from the sample(s) processed from each hole. GR = Guana River, R\\# = Reef number, H\\# = Sample hole number."}
+FigGraphs <- list.files(path = here::here("HOBS_geochronology_ms2/KableTest/"), pattern = ".png", full.names = TRUE)
+knitr::include_graphics(FigGraphs[15:23])
+```
+
+```{r EPDsbyHole-HCMC, echo=FALSE, message=FALSE, warning=FALSE, out.width = "50%", fig.show="hold", fig.cap="Radiocarbon age estimate empirical posterior distributions by sample hole for the Hendry/Mullock Creeks locality in Estero Bay, Florida. Triangles below the x-axes show the median estimated age for each specimen dated from the sample(s) processed from each hole. HC-MC = Hendry Creek/Mullock Creek, R\\# = Reef number, H\\# = Sample hole number."}
+FigGraphs <- list.files(path = here::here("HOBS_geochronology_ms2/KableTest/"), pattern = ".png", full.names = TRUE)
+knitr::include_graphics(FigGraphs[24:28])
+```
+
+```{r EPDsbyHole-JI, echo=FALSE, message=FALSE, warning=FALSE, out.width = "50%", fig.show="hold", fig.cap="Radiocarbon age estimate empirical posterior distributions by sample hole for the Jack Island locality in Indian River Lagoon, Florida. Triangles below the x-axes show the median estimated age for each specimen dated from the sample(s) processed from each hole. JI = Jack Island, R\\# = Reef number, H\\# = Sample hole number."}
+FigGraphs <- list.files(path = here::here("HOBS_geochronology_ms2/KableTest/"), pattern = ".png", full.names = TRUE)
+knitr::include_graphics(FigGraphs[29:32])
+```
+
+```{r EPDsbyHole-LB, echo=FALSE, message=FALSE, warning=FALSE, out.width = "50%", fig.show="hold", fig.cap="Radiocarbon age estimate empirical posterior distributions by sample hole for the Lemon Bay locality in Lemon Bay, Florida. Triangles below the x-axes show the median estimated age for each specimen dated from the sample(s) processed from each hole. LB = Lemon Bay, R\\# = Reef number, H\\# = Sample hole number."}
+FigGraphs <- list.files(path = here::here("HOBS_geochronology_ms2/KableTest/"), pattern = ".png", full.names = TRUE)
+knitr::include_graphics(FigGraphs[33:39])
+```
+
+```{r EPDsbyHole-LC, echo=FALSE, message=FALSE, warning=FALSE, out.width = "33%", fig.show="hold", fig.cap="Radiocarbon age estimate empirical posterior distributions by sample hole for the Lone Cabbage locality in Suwannee Sound, Florida. Triangles below the x-axes show the median estimated age for each specimen dated from the sample(s) processed from each hole. LC = Lone Cabbage, R\\# = Reef number, H\\# = Sample hole number."}
+FigGraphs <- list.files(path = here::here("HOBS_geochronology_ms2/KableTest/"), pattern = ".png", full.names = TRUE)
+knitr::include_graphics(FigGraphs[40:48])
+```
+
+```{r EPDsbyHole-LSG, echo=FALSE, message=FALSE, warning=FALSE, out.width = "50%", fig.show="hold", fig.cap="Radiocarbon age estimate empirical posterior distributions by sample hole for the Little St. George Island locality in Apalachicola Bay, Florida. Triangles below the x-axes show the median estimated age for each specimen dated from the sample(s) processed from each hole. LSG = Little St. George Island, R\\# = Reef number, H\\# = Sample hole number."}
+FigGraphs <- list.files(path = here::here("HOBS_geochronology_ms2/KableTest/"), pattern = ".png", full.names = TRUE)
+knitr::include_graphics(FigGraphs[49:53])
+```
+
+```{r EPDsbyHole-MR, echo=FALSE, message=FALSE, warning=FALSE, out.width = "50%", fig.show="hold", fig.cap="Radiocarbon age estimate empirical posterior distributions by sample hole for the Matanzas River locality in northeast Florida. Triangles below the x-axes show the median estimated age for each specimen dated from the sample(s) processed from each hole. MR = Matanzas River, R\\# = Reef number, H\\# = Sample hole number."}
+FigGraphs <- list.files(path = here::here("HOBS_geochronology_ms2/KableTest/"), pattern = ".png", full.names = TRUE)
+knitr::include_graphics(FigGraphs[54:59])
+```
+
+```{r EPDsbyHole-NP, echo=FALSE, message=FALSE, warning=FALSE, out.width = "50%", fig.show="hold", fig.cap="Radiocarbon age estimate empirical posterior distributions by sample hole for the New Pass locality in Estero Bay, Florida. Triangles below the x-axes show the median estimated age for each specimen dated from the sample(s) processed from each hole. NP = New Pass, R\\# = Reef number, H\\# = Sample hole number."}
+FigGraphs <- list.files(path = here::here("HOBS_geochronology_ms2/KableTest/"), pattern = ".png", full.names = TRUE)
+knitr::include_graphics(FigGraphs[60:65])
+```
+
+```{r EPDsbyHole-PC, echo=FALSE, message=FALSE, warning=FALSE, out.width = "50%", fig.show="hold", fig.cap="Radiocarbon age estimate empirical posterior distributions by sample hole for the Pellicer Creek locality in northeast Florida. Triangles below the x-axes show the median estimated age for each specimen dated from the sample(s) processed from each hole. PC = Pellicer Creek, R\\# = Reef number, H\\# = Sample hole number."}
+FigGraphs <- list.files(path = here::here("HOBS_geochronology_ms2/KableTest/"), pattern = ".png", full.names = TRUE)
+knitr::include_graphics(FigGraphs[66:72])
+```
+
+```{r TAFacetPlot1, echo=FALSE, message=FALSE, warning=FALSE, out.width = "100%", fig.cap="Median calibrated age estimates by reef for Big Hickory (BH), Goose Island/East Cove (GI-EC), Guana River (GR), Hendry/Mullock Creeks (HC-MC), Jack Island (JI), and Lemon Bay (LB) localities (reef plots from the same locality have the same header color). Error bars show the corrected posterior age estimate (i.e., estimated scale of time-averaging). R = reef; n = number of specimens dated from each sample."}
+knitr::include_graphics(here::here("HOBS_geochronology_ms2/Figures/HOBS_geochron_Fig14_2021-06-13.png"))
+```
+
+```{r TAFacetPlot2, echo=FALSE, message=FALSE, warning=FALSE, out.width = "100%", fig.cap="Median calibrated age estimates by reef for Lone Cabbage (LC), Little St. George Island (LSG), Matanzas River (MR), New Pass (NP), and Pellicer Creek (PC) localities (reef plots from the same locality have the same header color). Error bars show the corrected posterior age estimate (i.e., estimated scale of time-averaging). R = reef; n = number of specimens dated from each sample."}
+knitr::include_graphics(here::here("HOBS_geochronology_ms2/Figures/HOBS_geochron_Fig15_2021-06-13.png"))
+```
+
+```{r CVplot, echo=FALSE, out.width="100%", fig.cap="Plots showing A) the coefficient of variation of median sample age and B) the coefficient of variation of corrected posterior age estimates (CPE), calculated for different combinations of burial depth, locality, and reef. Note the y-axis in panel A is plotted on the log scale. BH = Big Hickory, GI-EC = Goose Island/East Cove, GR = Guana River, HC-MC = Hendry/Mullock Creeks, JI = Jack Island, LB = Lemon Bay, LC = Lone Cabbage, LSG = Little St. George Island, MR = Matanzas River, NP = New Pass, PC = Pellicer Creek."}
+knitr::include_graphics(here::here("HOBS_geochronology_ms2/Figures/HOBS_geochron_Fig16_2021-06-22.png"))
+```
+
+```{r AgevTAplot-byloc, echo=FALSE, out.width="100%", fig.cap="Plots of median calibrated age estimates against corrected posterior age estimates (CPE) by locality. Pearson correlation coefficients and associated p-values are shown on each plot ($\\alpha$ = 0.05). BH = Big Hickory, GI-EC = Goose Island/East Cove, GR = Guana River, HC-MC = Hendry/Mullock Creeks, JI = Jack Island, LB = Lemon Bay, LC = Lone Cabbage, LSG = Little St. George Island, MR = Matanzas River, NP = New Pass, PC = Pellicer Creek."}
+knitr::include_graphics(here::here("HOBS_geochronology_ms2/Figures/HOBS_geochron_Fig17_2021-06-22.png"))
+```
+
+```{r NvTAplot-byloc, echo=FALSE, out.width="100%", fig.cap="Plots of the number of specimens dated per sample against corrected posterior age estimates (CPE) by locality. Pearson correlation coefficients and associated p-values are shown on each plot ($\\alpha$ = 0.05). BH = Big Hickory, GI-EC = Goose Island/East Cove, GR = Guana River, HC-MC = Hendry/Mullock Creeks, JI = Jack Island, LB = Lemon Bay, LC = Lone Cabbage, LSG = Little St. George Island, MR = Matanzas River, NP = New Pass, PC = Pellicer Creek."}
+#Linear regressions of the number of dated specimens against corrected posterior age estimates (CPE) by locality. Shaded areas show 95\\% confidence intervals around the regression lines.
+knitr::include_graphics(here::here("HOBS_geochronology_ms2/Figures/HOBS_geochron_Fig19_2021-06-22.png"))
+```
+
+```{r AgevTAplot-all, echo=FALSE, out.width="100%", fig.cap="Median calibrated age estimates before present (bp) plotted against corrected posterior age estimates (CPE) for all samples in the present study as well as other recent studies of molluscan death assemblages. The oyster reef samples from this study tend to be more recent and less time-averaged than other types of molluscan death assemblages. The green and orange vertical lines correspond to the median median estimated ages for the 15-25cm and 25-35cm burial depths, respectively. Note that the y-axis is plotted on the log scale."}
+knitr::include_graphics(here::here("HOBS_geochronology_ms2/Figures/HOBS_geochron_Fig19_2021-06-19.png"))
+```
+
+```{r CVplot2, echo=FALSE, out.width="100%", fig.cap="Plots showing A) the coefficient of variation of median sample age and B) the coefficient of variation of corrected posterior age estimates (CPE) by the number of samples in the coefficient of variation calculation. Only samples from the 15-25cm burial depth are shown, but groupings are otherwise the same as in Figure 16. BH = Big Hickory, GI-EC = Goose Island/East Cove, GR = Guana River, HC-MC = Hendry/Mullock Creeks, JI = Jack Island, LB = Lemon Bay, LC = Lone Cabbage, LSG = Little St. George Island, MR = Matanzas River, NP = New Pass, PC = Pellicer Creek."}
+knitr::include_graphics(here::here("HOBS_geochronology_ms2/Figures/HOBS_geochron_Fig16b_2021-06-22.png"))
+```
+
+```{r PRICatNos, echo=FALSE, message=FALSE, warning=FALSE, fig.cap="Information on each of the oyster reef death assemblage specimens radiocarbon-dated for the historical oyster body size project. \"Station\" is the Paleontological Research Institution station number assigned to each sample collection location. \"IGSN\" is the international geosample number assigned to each sample. \"Catalog no.\" is the Paleontological Research Institution catalog number assigned to each specimen. \"Specimen field ID\" is the specimen identifier assigned by project staff in the laboratory."}
+pricats[Loc_ID == "JI-WC", Loc_ID := "JI"]
+pricats[ , samp := str_extract(Spec_ID, "H.S.")]
+for(i in 1:length(pricats$samp)){
+ pricats$depth[i] <- ifelse(!is.na(str_match(pricats$samp[i], "H.S1")), "15-25cm", "25-35cm") 
+}
+pricats[ , PRI_catalog_number := paste0("PRI", PRI_catalog_number)]
+pricats[Loc_ID == "GI-EC", Locality := "Goose Island/East Cove"]
+pricats[Loc_ID == "GR", Locality := "Guana River"]
+pricats[Loc_ID == "HC-MC", Locality := "Hendry/Mullock Creeks"]
+pricats[Loc_ID == "JI", Locality := "Jack Island"]
+pricats[Loc_ID == "LSG", Locality := "Little St. George Island"]
+pricats[Loc_ID == "MR", Locality := "Matanzas River"]
+pricats[Loc_ID == "PC", Locality := "Pellicer Creek"]
+pricats[ , Spec_ID := str_replace(Spec_ID, "S1_", "S1-")]
+pricats[ , Spec_ID := str_replace(Spec_ID, "S2_", "S2-")]
+pricats2 <- copy(pricats[ , .(Locality, PRI_station, IGSN, depth, PRI_catalog_number, Spec_ID)])
+setnames(pricats2, c("Locality", "PRI_station", "IGSN", "depth", "PRI_catalog_number", "Spec_ID"), c("Locality", "Station", "IGSN", "Depth", "Catalog no.", "Specimen field ID"))
+kbl(pricats2, booktabs = T, format = "latex", longtable = T, caption = "Information on each of the oyster reef death assemblage specimens radiocarbon-dated for the historical oyster body size project. \"Station\" is the Paleontological Research Institution station number assigned to each sample collection location. \"IGSN\" is the international geosample number assigned to each sample. \"Catalog no.\" is the Paleontological Research Institution catalog number assigned to each specimen. \"Specimen field ID\" is the specimen identifier assigned by project staff in the laboratory.") %>%
+  #add_header_above(c(" " = 6, "Left valve size (mm)" = 2, "Resilifer size (mm)" = 2)) %>%
+  footnote(threeparttable = T) %>%
+  kable_styling(latex_options = c("repeat_header"), font_size = 7)
+
+```
+
+```{r extraText, eval=FALSE, include=FALSE}
+# Geohistorical records that capture time-series of environmental conditions or ecosystem traits in the past, including stratigraphic records (e.g., cores from varved lake beds, glacial ice or the sea floor) and accretionary records (e.g., geochemical analysis of growth series from mollusk shells or coral heads) are valuable sources of information, often from geographic locations or periods in time for which no alternative contemporaneous records exist [@dietlConservationPaleobiologyLeveraging2015]. 
+# 
+# Time averaging in taphonomy and paleoecology refers to the accumulation of remains from multiple time periods into the same assemblage or stratigraphic unit. The degree of time averaging in an assemblage is an important characteristic for understanding the process of its formation and for determining the possible paleoecological inferences that are feasible based on the assemblage (ref ref). For instance, most geochronological investigations of molluscan death assemblages have found scales of time averaging ranging from centuries to millennia [@kowalewskiOneFossilRecord2018], though some have documented decadal-scale averaging [e.g., @dominguezTimeaveragingStratigraphicResolution2016].The mixing of shells on a wide range of timescales points to a suite of factors that are responsible for time averaging, including physical factors such as sedimentation rate and water column energy, chemical factors such as the pH of surrounding water and sediments and the mineral composition of the sediments and biological factors such as the degree of bioturbation of the assemblage and bioerosion or breakage of the shell remains (ref ref ref).
+# 
+# Most assessments of time averaging of molluscan assemblages have used either radiocarbon-calibrated amino acid racemization geochronology (e.g., ) or radiocarbon geochronology to date random selections of shells. These studies can be very expensive to date sufficient samples, but improvements in data analysis and interpretation methods and the decreasing costs of analyses over time have made routine study of time-averaging in mollusk assemblages much more feasible. At the same time, improvements in instrumentation and analysis methods have allowed much smaller carbonate samples to be dated. Newer work has led to evidence of the long-suspected importance of the durability of the shells in an assemblage in determining the time-averaging of the remains. Kowalewski et al. [-@kowalewskiOneFossilRecord2018] compared radiocarbon dates of complete shells of the bivalve _Tucetona pectinata_ with those of intact tests of the sand dollar _Leodia sexiesperforata_. They found a four-order-of-magnitude difference in the degree of time-averaging between the bivalves and relatively more delicate sand dollar tests, with the _T. pectinata_ time-averaged over millennial timescales and the _L. sexiesperforata_ time-averaged over sub-decadal timescales. Thus, even within an assemblage the degree of time averaging may be drastically different between taxonomic groups whose remains vary in intrinsic durability.
+# 
+# The results of such studies highlight the long-recognized need to understand patterns of time-averaging to determine the types of studies that are possible with particular fossil or sub-fossil assemblages (ref, ref). For instance, many paleoecological questions involving behavioral change over time on a local scale or interpretations of biogeographic patterns in response to relatively rapid environmental change require lower time-averaging than studies of general biodiversity trends through time. One might expect that reef assemblages are less susceptible to forces of mixing than others and thus that they would be some of the highest-resolution fossil assemblages, and therefore among the best choices for documenting biological and ecological processes operating on ecological timescales in the past. Oyster reefs, for instance, are a prominent benthic habitat type around the world with many species, especially the genus _Crassostrea_, producing large, dense aggregations that can be >1m in height, depending on tidal conditions. _Crassostrea_ reefs are formed by settlement of larval oysters upon the existing oyster shells on the surface of the reef, which then cement themselves in place and grow into adults, a process that produces clumps of oyster shells attached to one another that often become interlocked like puzzle pieces. The resulting structure is likely to limit the effects of bioturbation and other mixing forces on the shells and sediments within an oyster reef, as has been demonstrated for seagrass beds, which also stabilize sediments and reduce bioturbation [@arkleEvidenceStratigraphyMolluscan2018]. To test this assumption, here we report results of radiocarbon analyses of oyster reef death assemblages from living, natural oyster reefs in Florida, USA. The results could have important implications for studies of oyster reef bioherms in the fossil record.
+```
+
+```{r eval=FALSE, include=FALSE}
+_Text based on elsarticle sample manuscript, see [http://www.elsevier.com/author-schemas/latex-instructions#elsarticle](http://www.elsevier.com/author-schemas/latex-instructions#elsarticle)_
+
+
+%The Elsevier article class
+%==========================
+
+%#### Installation
+
+%If the document class *elsarticle* is not available on your computer,
+%you can download and install the system package *texlive-publishers*
+%(Linux) or install the LaTeX package *elsarticle* using the package
+%manager of your TeX installation, which is typically TeX Live or MikTeX.
+
+%#### Usage
+
+%Once the package is properly installed, you can use the document class
+%*elsarticle* to create a manuscript. Please make sure that your
+%manuscript follows the guidelines in the Guide for Authors of the
+%relevant journal. It is not necessary to typeset your manuscript in
+%exactly the same way as an article, unless you are submitting to a
+%camera-ready copy (CRC) journal.
+
+%#### Functionality
+
+%The Elsevier article class is based on the standard article class and
+%supports almost all of the functionality of that class. In addition, it
+%features commands and options to format the
+
+%-   document style
+
+%-   baselineskip
+
+%-   front matter
+
+%-   keywords and MSC codes
+
+%-   theorems, definitions and proofs
+
+%-   lables of enumerations
+
+%-   citation style and labeling.
+
+%Front matter
+%============
+
+%The author names and affiliations could be formatted in two ways:
+
+%(1) Group the authors per affiliation.
+
+%(2) Use footnotes to indicate the affiliations.
+
+%See the front matter of this document for examples. You are recommended
+%to conform your choice to the journal you are submitting to.
+
+%Bibliography styles
+%===================
+
+%There are various bibliography styles available. You can select the
+%style of your choice in the preamble of this document. These styles are
+%Elsevier styles based on standard styles like Harvard and Vancouver.
+%Please use BibTeX to generate your bibliography and include DOIs
+%whenever available.
+```
+
+
+References {#references .unnumbered}
+==========
