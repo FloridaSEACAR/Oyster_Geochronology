@@ -24,8 +24,6 @@ address:
 #  - code: 2
 #    text: "Equal contribution"
 #abstract: |
-#  This is the abstract.
-#  It consists of two paragraphs.
 journal: "National Oceanic and Atmospheric Administration"
 date: ""
 bibliography: MyLibrary2.bib
