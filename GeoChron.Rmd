@@ -146,7 +146,6 @@ Data <- list(N = nrow(sampsum),
              Reef = sampsum$reef3,
              Reef2Locality = sampsum$reef2Locality,
              x = sampsum$median_age_bp,
-             y = sampsum$median_age_bp,
              nL = length(unique(sampsum$Locality)),
              nR = length(unique(sampsum$reef3)))
 
@@ -156,7 +155,6 @@ Data <- list(N = nrow(sampsum),
              Reef = sampsum$reef3,
              Reef2Locality = sampsum$reef2Locality,
              x = sampsum$Sample_corrected_posterior_age_estimate,
-             y = sampsum$Sample_corrected_posterior_age_estimate,
              nL = length(unique(sampsum$Locality)),
              nR = length(unique(sampsum$reef3)))
 
@@ -166,7 +164,6 @@ Data <- list(N = nrow(depthdiffs2),
              Reef = depthdiffs2$reef3,
              Reef2Locality = depthdiffs2$reef2Locality,
              x = depthdiffs2$depthdiff_mabp,
-             y = depthdiffs2$depthdiff_mabp,
              nL = length(unique(depthdiffs2$Locality)),
              nR = length(unique(depthdiffs2$reef3)))
 
@@ -176,7 +173,6 @@ Data <- list(N = nrow(depthdiffs2),
              Reef = depthdiffs2$reef3,
              Reef2Locality = depthdiffs2$reef2Locality,
              x = depthdiffs2$depthdiff_cpe,
-             y = depthdiffs2$depthdiff_cpe,
              nL = length(unique(depthdiffs2$Locality)),
              nR = length(unique(depthdiffs2$reef3)))
 
