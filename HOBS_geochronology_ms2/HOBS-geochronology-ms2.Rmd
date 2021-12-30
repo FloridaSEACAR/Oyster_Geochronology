@@ -887,7 +887,7 @@ gtvar8g2_s5 <- brm(medage ~ (1 | depth) + (1 | hole) + (1 | hole:reef), data = m
 
 gtvar8g2_s6 <- brm(medage ~ (1 | depth) + (1 | hole:reef) + (1 | hole:reef:loc), data = medagesim, family = gaussian, cores = 4, control = list(adapt_delta = 0.9, max_treedepth = 15), iter = 3000, warmup = 1000, chains = 4, thin = 3, backend = "cmdstanr", threads = threading(2), file = here::here("gtvar8g2_s6.rds"))
 
-gtvar8g2_s7 <- brm(medage ~ (1 | gr(depth, by = hole)) + (1 | hole/reef/loc), data = medagesim_sub, family = gaussian, cores = 4, control = list(adapt_delta = 0.8, max_treedepth = 10), iter = 3000, warmup = 1000, chains = 4, thin = 3, backend = "cmdstanr", threads = threading(2), file = here::here("gtvar8g2_s7.rds"))
+gtvar8g2_s7 <- brm(medage ~ (1 + depth | gr(hole, by = reef)) + (1 + depth | gr(reef, by = loc)) + (1 + depth | loc), data = medagesim_sub, family = gaussian, cores = 4, control = list(adapt_delta = 0.8, max_treedepth = 10), iter = 3000, warmup = 1000, chains = 4, thin = 3, backend = "cmdstanr", threads = threading(2), file = here::here("gtvar8g2_s7.rds"))
 
 
 results <- broom.mixed::tidy(gtvar8)
@@ -1394,6 +1394,10 @@ Retal <- data.frame(median_age_bp = c(2658, 1318, 230),
 label3 <- c(expression(atop(NA, atop(textstyle('Ritter et al. 2017'), 
                                      textstyle(paste('(', italic('Mactra sp.'), ')'))))))
 
+Tetal <- readRDS(here::here("Tomasovych2018_medageandta.rds"))
+label4 <- c(expression(atop(NA, atop(textstyle('Toma\u161ov\uFDch et al. 2018'),
+                                     textstyle(paste0('(', italic('Corbula gibba'), ')'))))))
+
 png(file = here::here(paste0("HOBS_geochronology_ms2/Figures/HOBS_geochron_Fig18_", Sys.Date(), ".png")), width = 2500, height = 2000, res = 275)
 ggplot(sampsum, aes(x = median_age_bp, y = Sample_corrected_posterior_age_estimate)) +
   theme_classic() +
@@ -1438,14 +1442,15 @@ TAscalecompare <- ggplot(sampsum, aes(x = median_age_bp, y = Sample_corrected_po
   #annotate('text', x = Detal$median_age_bp[6] - 250, y = Detal$Sample_corrected_posterior_age_estimate[6] + 1700, 
   #         label = label2) +
   geom_point(data = Retal, aes(shape = "Ritter et al. (2017)"), fill = 'dark grey', color = 'black', size = 1.5) +
+  geom_point(data = Tetal[depth >= 10 & depth <= 35, ], aes(x = medage, y = corIQR, shape = "Toma\u{161}ov\u{FD}ch et al. (2018)"), fill = 'dark grey', color = 'black', size = 1.5) +
   scale_y_continuous(trans='log10') +
   scale_x_reverse() +
   labs(x = 'Median age (bp)',
-       y = 'Corrected posterior age estimate (yr)',
+       y = 'Time averaging estimate (yr)',
        fill = 'Burial depth (cm)',
        shape = "") + 
-  scale_shape_manual(values = c("This study" = 21, "Kowalewski et al. (2018)" = 22, "Dominguez et al. (2016)" = 23, "Ritter et al. (2017)" = 24),
-                     breaks = c("This study", "Dominguez et al. (2016)", "Ritter et al. (2017)", "Kowalewski et al. (2018)")) +
+  scale_shape_manual(values = c("This study" = 21, "Kowalewski et al. (2018)" = 22, "Dominguez et al. (2016)" = 23, "Ritter et al. (2017)" = 24, "Toma\u{161}ov\u{FD}ch et al. (2018)" = 25),
+                     breaks = c("This study", "Dominguez et al. (2016)", "Ritter et al. (2017)", "Kowalewski et al. (2018)", "Toma\u{161}ov\u{FD}ch et al. (2018)")) +
   guides(fill=guide_legend(override.aes=list(shape=21))) +
   theme(axis.title = element_text(size = 7), 
         axis.text = element_text(size = 7, colour = "black"), 
