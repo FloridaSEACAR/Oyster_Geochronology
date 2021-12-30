@@ -23,8 +23,6 @@ parameters {
   real<lower=0> sigma_hole;
   real<lower=0> sigma_reef;
   real<lower=0> sigma_locality;
-  real d;
-  real mu_depth;
   real<lower=0> sigma_depth;
 }
 
@@ -47,7 +45,7 @@ model {
   sigma_locality ~ cauchy(0,1);
   sigma_depth ~ cauchy(0,1);
   
-  d ~ normal(0,10);
+
   
   for( ll in 1:nL){
     mu_locality[ll] ~ normal(mu_region, sigma_locality);
@@ -59,8 +57,7 @@ model {
      
   for ( ii in 1:N){
     x[ii] ~ normal(mu_reef[Reef[ii]], sigma_hole);
-    y[ii] ~ normal(d + mu_reef[Reef[ii]], sigma_hole);
-    y[ii] - x[ii] ~ normal(mu_depth, sigma_depth);
+
   }
 }
 
