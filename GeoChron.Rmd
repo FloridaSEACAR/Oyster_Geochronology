@@ -104,6 +104,86 @@ nHRL %<>% mutate(regional_mean = c)
 ```
 
 
+Create data list from Geochronology "sampsum" data table created from "HOBS-geochronology-ms2.rmd"
+
+```{r}
+sampsum[, Loc := str_sub(sample, 1, 2), by = sample]
+sampsum[, Locality := as.integer(factor(Loc, levels = unique(sampsum$Loc)))]
+# sampsum[, reef2 := fcase(Locality %in% c(1, 2, 5:7, 9:11), reef,
+#                          Locality == 3, ifelse(reef == 5, 4L, reef),
+#                          Locality == 4, ifelse(reef == 4, 3L, reef),
+#                          Locality == 8, as.integer(reef - 1)), by = c("Locality", "reef")]
+sampsum[, reef3 := as.integer(factor(reefID, levels = unique(sampsum$reefID)))]
+sampsum[, reef2Locality := Locality, by = c("Locality", "reef")]
+sampsum[, holeID2 := holeID]
+sampsum[, sampsperhole := length(holeID), by = holeID2]
+
+depthdiffs <- sampsum[sampsperhole == 2, .(sample, 
+                                           Sample_median_age,
+                                           median_age_bp,
+                                           Sample_corrected_posterior_age_estimate, 
+                                           depth, 
+                                           reef, 
+                                           locality, 
+                                           reefID, 
+                                           holeID,
+                                           holeID2,
+                                           Locality,
+                                           reef3,
+                                           reef2Locality)]
+
+depthdiffs[, `:=` (depthdiff_mabp = median_age_bp[depth == "25-35"] -  median_age_bp[depth == "15-25"], 
+                   depthdiff_cpe = Sample_corrected_posterior_age_estimate[depth == "25-35"] - Sample_corrected_posterior_age_estimate[depth == "15-25"]), by = holeID2]
+
+depthdiffs2 <- distinct(depthdiffs[, .(reef, locality, reefID, holeID, Locality, reef3, reef2Locality, depthdiff_mabp, depthdiff_cpe)])
+
+
+xtabs(~Locality + Loc, sampsum)
+
+#for median age over space
+Data <- list(N = nrow(sampsum),
+             Locality = sampsum$Locality,
+             Reef = sampsum$reef3,
+             Reef2Locality = sampsum$reef2Locality,
+             x = sampsum$median_age_bp,
+             y = sampsum$median_age_bp,
+             nL = length(unique(sampsum$Locality)),
+             nR = length(unique(sampsum$reef3)))
+
+#for CPE over space
+Data <- list(N = nrow(sampsum),
+             Locality = sampsum$Locality,
+             Reef = sampsum$reef3,
+             Reef2Locality = sampsum$reef2Locality,
+             x = sampsum$Sample_corrected_posterior_age_estimate,
+             y = sampsum$Sample_corrected_posterior_age_estimate,
+             nL = length(unique(sampsum$Locality)),
+             nR = length(unique(sampsum$reef3)))
+
+#for median age depth differences over space
+Data <- list(N = nrow(depthdiffs2),
+             Locality = depthdiffs2$Locality,
+             Reef = depthdiffs2$reef3,
+             Reef2Locality = depthdiffs2$reef2Locality,
+             x = depthdiffs2$depthdiff_mabp,
+             y = depthdiffs2$depthdiff_mabp,
+             nL = length(unique(depthdiffs2$Locality)),
+             nR = length(unique(depthdiffs2$reef3)))
+
+#for CPE depth differences over space
+Data <- list(N = nrow(depthdiffs2),
+             Locality = depthdiffs2$Locality,
+             Reef = depthdiffs2$reef3,
+             Reef2Locality = depthdiffs2$reef2Locality,
+             x = depthdiffs2$depthdiff_cpe,
+             y = depthdiffs2$depthdiff_cpe,
+             nL = length(unique(depthdiffs2$Locality)),
+             nR = length(unique(depthdiffs2$reef3)))
+
+```
+
+
+
 Now let's see if Stan can recover these values
 
 ```{r}
@@ -126,7 +206,7 @@ model <- cmdstan_model("GeoChron.stan")
 fit = model$sample(data = Data,
     seed = 1234,
     chains = 8,
-    parallel_chains = 8,
+    parallel_chains = 4,
     refresh = 500,
     iter_warmup = 1000, #3000,
     iter_sampling = 5000,
