@@ -27,84 +27,10 @@ suppressPackageStartupMessages(library(tidyverse))
 suppressPackageStartupMessages(library(magrittr))
 suppressPackageStartupMessages(library(lme4))
 suppressPackageStartupMessages(library(cmdstanr))
+suppressPackageStartupMessages(library(bayesplot))
 ```
  
- Let's simulate a data set from this model.
- 
- Generate a number of localities from the Region (we are thinking an average of 11)
- We also pick a regional mean age, c
- 
-```{r}
-set.seed(1234)
-  nL = 11
-  c = 30
-```
-
-Generate means for each locality
-$\sigma_c = 3$
-```{r}
-locality_sigma = 5
-c_l = c + rnorm(n = nL, mean = 0, s = locality_sigma)
-```
-
-Each locality has somewhere between 2 to 4 reefs.
-
-$nR$ tells how many reefs for each locality
-
-```{r}
-nR = round(runif(n = nL, min = 2, max = 4))
-
-```
-
-```{r}
-n = sum(nR)
-nRL = data.frame(Locality = integer(n), Reef = integer(n) )
-kk = 1
-for( ii in 1:nL){
-   for( jj in 1:nR[ii]){
-     nRL$Locality[kk] = ii
-     nRL$Reef[kk] = kk #jj need a unique identifier for each reef
-     kk = kk + 1}
-}
-rm(n)
-```
-Add locality and reef means
-```{r}
-reef_sigma = 2
-nRL %<>% mutate(locality_mean = 0, reef_mean = 0)
-kk = 1
-for( ii in 1:nL){
-   for( jj in 1:nR[ii]){
-     nRL$locality_mean[kk] = c_l[ii]
-     nRL$reef_mean[kk] = rnorm(n = 1, m = c_l[ii], s = reef_sigma )
-     kk = kk + 1}
-}
-```
-
-Each reef has three holes and the values for those holes are generate from the reef mean
-
-```{r}
-nRL %>% slice(rep(1:n(), each = 3)) -> nHRL # this triplicates the rows
-hole_sigma = 2
-depth_mean = 4; depth_sigma = 1
-nHRL %<>%  mutate( x = 0, y = 0)
-
-for( ii in 1:nrow(nHRL)){
-   nHRL$x[ii] = rnorm(n = 1, m = nHRL$reef_mean[ii], s = hole_sigma)
-   d = rnorm(n = 1, m = depth_mean, s = depth_sigma)
-   nHRL$y[ii] = d + nHRL$x[ii] 
-}
-
-```
-
-For completeness, add the Regional mean, c (wich in fact is the mean of the depth 1 age in a hole)
-
-```{r}
-nHRL %<>% mutate(regional_mean = c)
-```
-
-
-Create data list from Geochronology "sampsum" data table created from "HOBS-geochronology-ms2.rmd"
+Create data list from Geochronology "sampsum" data table created from "HOBS-geochronology-ms2.rmd". For a simulation illustrating how this model works, see "GeoChron_sim.Rmd."
 
 ```{r}
 sampsum[, Loc := str_sub(sample, 1, 2), by = sample]
@@ -117,6 +43,38 @@ sampsum[, reef3 := as.integer(factor(reefID, levels = unique(sampsum$reefID)))]
 sampsum[, reef2Locality := Locality, by = c("Locality", "reef")]
 sampsum[, holeID2 := holeID]
 sampsum[, sampsperhole := length(holeID), by = holeID2]
+sampsum_r2l <- distinct(sampsum[, .(reef, 
+                                    locality, 
+                                    reefID,
+                                    Locality,
+                                    reef3,
+                                    reef2Locality)])
+
+sampsum_15to25cm <- distinct(sampsum[depth == "15-25", .(sample,
+                                                         Sample_median_age,
+                                                         median_age_bp,
+                                                         Sample_corrected_posterior_age_estimate,
+                                                         reef,
+                                                         locality,
+                                                         reefID,
+                                                         holeID,
+                                                         holeID2,
+                                                         Locality,
+                                                         reef3,
+                                                         reef2Locality)])
+
+sampsum_25to35cm <- distinct(sampsum[depth == "25-35", .(sample,
+                                                         Sample_median_age,
+                                                         median_age_bp,
+                                                         Sample_corrected_posterior_age_estimate,
+                                                         reef,
+                                                         locality,
+                                                         reefID,
+                                                         holeID,
+                                                         holeID2,
+                                                         Locality,
+                                                         reef3,
+                                                         reef2Locality)])
 
 depthdiffs <- sampsum[sampsperhole == 2, .(sample, 
                                            Sample_median_age,
@@ -137,110 +95,187 @@ depthdiffs[, `:=` (depthdiff_mabp = median_age_bp[depth == "25-35"] -  median_ag
 
 depthdiffs2 <- distinct(depthdiffs[, .(reef, locality, reefID, holeID, Locality, reef3, reef2Locality, depthdiff_mabp, depthdiff_cpe)])
 
+locs <- distinct(sampsum_15to25cm[, .(locality, Locality)])
+locs[, loclab := 12 - Locality]
+setorder(locs, "Locality")
 
-xtabs(~Locality + Loc, sampsum)
+reefs <- distinct(sampsum_15to25cm[, .(reefID, reef3)])
+reefs[, reeflab := 32 - reef3]
+setorder(reefs, "reef3")
 
-#for median age over space
-Data <- list(N = nrow(sampsum),
-             Locality = sampsum$Locality,
-             Reef = sampsum$reef3,
-             Reef2Locality = sampsum$reef2Locality,
-             x = sampsum$median_age_bp,
-             nL = length(unique(sampsum$Locality)),
-             nR = length(unique(sampsum$reef3)))
+#median estimated sample ages and corresponding time-averaging estimates from Dominguez et al. (2016)
+Detal <- data.table(median_age_bp = c(123, 283, 146, 148, 160, 2043), 
+                    Sample_corrected_posterior_age_estimate = c(68, 2670, 16, 27, 16, 1937),
+                    Locality = c(1, 1, 1, 1, 1, 1),
+                    Reef = c(1, 2, 3, 4, 5, 6),
+                    Reef2Locality = c(1, 1, 1, 1, 1, 1),
+                    nL = 1,
+                    nR = 6)
 
-#for CPE over space
-Data <- list(N = nrow(sampsum),
-             Locality = sampsum$Locality,
-             Reef = sampsum$reef3,
-             Reef2Locality = sampsum$reef2Locality,
-             x = sampsum$Sample_corrected_posterior_age_estimate,
-             nL = length(unique(sampsum$Locality)),
-             nR = length(unique(sampsum$reef3)))
+#for median age over space (15-25cm burial depth)
+HOBS_medagexspace_15to25cm <- list(N = nrow(sampsum_15to25cm),
+                                   Locality = sampsum_15to25cm$Locality,
+                                   Reef = sampsum_15to25cm$reef3,
+                                   Reef2Locality = sampsum_r2l$reef2Locality,
+                                   x = sampsum_15to25cm$median_age_bp,
+                                   nL = length(unique(sampsum_15to25cm$Locality)),
+                                   nR = length(unique(sampsum_15to25cm$reef3)))
+
+#for CPE over space (15-25cm burial depth)
+HOBS_cpexspace_15to25cm <- list(N = nrow(sampsum_15to25cm),
+                                Locality = sampsum_15to25cm$Locality,
+                                Reef = sampsum_15to25cm$reef3,
+                                Reef2Locality = sampsum_r2l$reef2Locality,
+                                x = sampsum_15to25cm$Sample_corrected_posterior_age_estimate,
+                                nL = length(unique(sampsum_15to25cm$Locality)),
+                                nR = length(unique(sampsum_15to25cm$reef3)))
+
+#for median age over space (25-35cm burial depth)
+HOBS_medagexspace_25to35cm <- list(N = nrow(sampsum_25to35cm),
+                                   Locality = sampsum_25to35cm$Locality,
+                                   Reef = sampsum_25to35cm$reef3,
+                                   Reef2Locality = sampsum_r2l$reef2Locality,
+                                   x = sampsum_25to35cm$median_age_bp,
+                                   nL = length(unique(sampsum_25to35cm$Locality)),
+                                   nR = length(unique(sampsum_25to35cm$reef3)))
+
+#for CPE over space (25-35cm burial depth)
+HOBS_cpexspace_25to35cm <- list(N = nrow(sampsum_25to35cm),
+                                Locality = sampsum_25to35cm$Locality,
+                                Reef = sampsum_25to35cm$reef3,
+                                Reef2Locality = sampsum_r2l$reef2Locality,
+                                x = sampsum_25to35cm$Sample_corrected_posterior_age_estimate,
+                                nL = length(unique(sampsum_25to35cm$Locality)),
+                                nR = length(unique(sampsum_25to35cm$reef3)))
 
 #for median age depth differences over space
-Data <- list(N = nrow(depthdiffs2),
-             Locality = depthdiffs2$Locality,
-             Reef = depthdiffs2$reef3,
-             Reef2Locality = depthdiffs2$reef2Locality,
-             x = depthdiffs2$depthdiff_mabp,
-             nL = length(unique(depthdiffs2$Locality)),
-             nR = length(unique(depthdiffs2$reef3)))
+HOBS_medageddxspace <- list(N = nrow(depthdiffs2),
+                            Locality = depthdiffs2$Locality,
+                            Reef = depthdiffs2$reef3,
+                            Reef2Locality = sampsum_r2l$reef2Locality,
+                            x = depthdiffs2$depthdiff_mabp,
+                            nL = length(unique(depthdiffs2$Locality)),
+                            nR = length(unique(depthdiffs2$reef3)))
 
 #for CPE depth differences over space
-Data <- list(N = nrow(depthdiffs2),
-             Locality = depthdiffs2$Locality,
-             Reef = depthdiffs2$reef3,
-             Reef2Locality = depthdiffs2$reef2Locality,
-             x = depthdiffs2$depthdiff_cpe,
-             nL = length(unique(depthdiffs2$Locality)),
-             nR = length(unique(depthdiffs2$reef3)))
+HOBS_cpeddxspace <- list(N = nrow(depthdiffs2),
+                         Locality = depthdiffs2$Locality,
+                         Reef = depthdiffs2$reef3,
+                         Reef2Locality = sampsum_r2l$reef2Locality,
+                         x = depthdiffs2$depthdiff_cpe,
+                         nL = length(unique(depthdiffs2$Locality)),
+                         nR = length(unique(depthdiffs2$reef3)))
+
+#for median age depth differences over space - Dominguez et al. (2016) data
+Detal_medagexspace <- list(N = 6,
+                           Locality = Detal$Locality,
+                           Reef = Detal$Reef,
+                           Reef2Locality = Detal$Reef2Locality,
+                           x = Detal$median_age_bp,
+                           nL = Detal$nL,
+                           nR = Detal$nR)
+
+#for CPE depth differences over space - Dominguez et al. (2016) data
+Detal_cpexspace <- list(N = 6,
+                        Locality = Detal$Locality,
+                        Reef = Detal$Reef,
+                        Reef2Locality = Detal$Reef2Locality,
+                        x = Detal$Sample_corrected_posterior_age_estimate,
+                        nL = Detal$nL,
+                        nR = Detal$nR)
+
+```
+
+```{r}
+
+#For HOBS data
+model_HOBS <- cmdstan_model("GeoChron.stan")
+
+#For Dominguez et al. (2016) data
+model_Detal <- cmdstan_model("GeoChron_Detal.stan")
+
+```
+
+```{r}
+
+datalists <- c(as.name("HOBS_medagexspace_15to25cm"), 
+               as.name("HOBS_cpexspace_15to25cm"),
+               as.name("HOBS_medagexspace_25to35cm"),
+               as.name("HOBS_cpexspace_25to35cm"),
+               as.name("HOBS_medageddxspace"),
+               as.name("HOBS_cpeddxspace"),
+               as.name("Detal_medagexspace"),
+               as.name("Detal_cpexspace"))
+
+for(Data in datalists){
+  if(str_detect(Data, "HOBS")){
+    model <- cmdstan_model("GeoChron.stan")
+  } else{
+    model <- cmdstan_model("GeoChron_Detal.stan")
+  }
+  
+  fit = model$sample(data = eval(Data),
+        seed = 1234,
+        chains = 8,
+        parallel_chains = 8,
+        refresh = 1000,
+        iter_warmup = 3000, #3000,
+        iter_sampling = 15000,
+        thin =  3,
+        adapt_delta = 0.99,
+        max_treedepth = 15)
+  
+  fit$save_output_files("StanOutput")
+  fit$cmdstan_diagnose()
+  dim(fit$draws()) # accessing draws seems to fill the structure with draws
+  saveRDS(fit, file = here::here(paste0("StanOutput/", Data, ".rds")))
+  
+  plot1 <- bayesplot::mcmc_intervals(fit$draws("mu_locality")) 
+  plot1 <- plot1 +
+    geom_text(data = locs, aes(x = min(plot1$data$ll) - 3, y = loclab, label = locality), inherit.aes = FALSE) +
+    xlim(min(plot1$data$ll) - 5, max(plot1$data$hh))
+  
+  saveRDS(plot1, here::here(paste0("StanOutput/", Data, "locintplot.rds")))
+  ggsave(filename = here::here(paste0("StanOutput/", Data, "locintplot.pdf")),
+         plot = plot1,
+         width = 6,
+         height = 6,
+         units = "in",
+         dpi = 400)
+  
+  plot2 <- bayesplot::mcmc_intervals(fit$draws("mu_reef"))
+  plot2 <- plot2 +
+    geom_text(data = reefs, aes(x = min(plot2$data$ll) - 10, y = reeflab, label = reefID), inherit.aes = FALSE) +
+    xlim(min(plot2$data$ll) - 12, max(plot2$data$hh))
+  
+  saveRDS(plot2, here::here(paste0("StanOutput/", Data, "reefintplot.rds")))
+  ggsave(filename = here::here(paste0("StanOutput/", Data, "reefintplot.pdf")),
+         plot = plot2,
+         width = 6,
+         height = 6,
+         units = "in",
+         dpi = 400)
+}
 
 ```
 
 
-
-Now let's see if Stan can recover these values
-
 ```{r}
 
-Data = list( N = nrow(nHRL),
-             Locality = nHRL$Locality,
-             Reef = nHRL$Reef,
-             Reef2Locality = nRL$Locality, 
-             x = nHRL$x,
-             y = nHRL$y,
-             nL = length(unique(nHRL$Locality)),
-             nR = length(unique(nHRL$Reef)))
-
-model <- cmdstan_model("GeoChron.stan")
+bayesplot::mcmc_dens(fit$draws("mu_locality"), facet_args = list(scales = "fixed", ncol = 3))
+plot1 <- bayesplot::mcmc_intervals(fit$draws("mu_locality")) 
+plot1 +
+  geom_text(data = locs, aes(x = min(plot1$data$ll) - 3, y = loclab, label = locality), inherit.aes = FALSE) +
+  xlim(min(plot1$data$ll) - 5, max(plot1$data$hh))
+  
 
 ```
 
 ```{r}
-
-fit = model$sample(data = Data,
-    seed = 1234,
-    chains = 8,
-    parallel_chains = 4,
-    refresh = 500,
-    iter_warmup = 1000, #3000,
-    iter_sampling = 5000,
-    thin =  1,
-    adapt_delta = 0.99)
-```
-
-do some comparisons with parameter values
-```{r}
-estimated_locality_means = as.numeric(apply(fit$draws("mu_locality"),3,mean))
-
-plot(c_l, estimated_locality_means);abline(0,1)
-```
-```{r}
-estimated_reef_means = as.numeric(apply(fit$draws("mu_reef"),3,mean))
-plot(nRL$reef_mean, estimated_reef_means); abline(0,1)
-```
-```{r}
-print(c(estimated_sigma_locality = as.numeric(apply(fit$draws("sigma_locality"),3,median)),locality_sigma))
-```
-
-```{r}
-print(c(estimated_sigma_reef = as.numeric(apply(fit$draws("sigma_reef"),3,median)),reef_sigma))
-```
-```{r}
-print(c(estimated_sigma_hole = as.numeric(apply(fit$draws("sigma_hole"),3,median)),hole_sigma))
-```
-
-```{r}
-print(c(estimated_depth = as.numeric(apply(fit$draws("d"),3,median)),depth_mean))
-```
-sigma_depth
-```{r}
-print(c(estimated_depth_sigma = as.numeric(apply(fit$draws("sigma_depth"),3,median)), depth_sigma))
-```
-mu_depth
-```{r}
-print(c(estimated_depth_mu = as.numeric(apply(fit$draws("mu_depth"),3,median)), depth_mean))
+plot2 <- bayesplot::mcmc_intervals(fit$draws("mu_reef"))
+plot2 +
+  geom_text(data = reefs, aes(x = min(plot2$data$ll) - 8, y = reeflab, label = reefID), inherit.aes = FALSE) +
+  xlim(min(plot2$data$ll) - 10, max(plot2$data$hh))
 ```
 
  

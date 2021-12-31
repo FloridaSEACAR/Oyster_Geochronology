@@ -889,6 +889,8 @@ gtvar8g2_s6 <- brm(medage ~ (1 | depth) + (1 | hole:reef) + (1 | hole:reef:loc),
 
 gtvar8g2_s7 <- brm(medage ~ (1 + depth | gr(hole, by = reef)) + (1 + depth | gr(reef, by = loc)) + (1 + depth | loc), data = medagesim_sub, family = gaussian, cores = 4, control = list(adapt_delta = 0.8, max_treedepth = 10), iter = 3000, warmup = 1000, chains = 4, thin = 3, backend = "cmdstanr", threads = threading(2), file = here::here("gtvar8g2_s7.rds"))
 
+gtvar8g2_s8 <- brm(medage ~ depth + (1 + depth | gr(hole, by = reef)) + (1 + depth | gr(reef, by = loc)) + (1 + depth | loc), data = medagesim_sub, family = gaussian, cores = 4, control = list(adapt_delta = 0.8, max_treedepth = 10), iter = 3000, warmup = 1000, chains = 4, thin = 3, backend = "cmdstanr", threads = threading(2), file = here::here("gtvar8g2_s8.rds"))
+
 
 results <- broom.mixed::tidy(gtvar8)
 results$response <- "Median age"
