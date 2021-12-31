@@ -1,0 +1,172 @@
+---
+title: "GeoChron"
+output: html_notebook
+---
+Assess variability of age or CPE estimates at multiple levels.
+At the highest level is a region which is composed of $nL$ localities.
+
+The mean age across a region is $e$ which generates means $c_l$ for each locality.
+
+$$ c_l = e + \zeta_c, l = 1,\ldots, nL, \zeta_c \sim N(0, \sigma_c^2)$$
+Each locality has a number $nR_l$ of constituent reefs and a mean $c_l$ which generates means for each reef.
+
+$$r_{kl} = c_l + \zeta_r, k = 1,\ldots, nR_l, l = 1\ldots nL, \zeta_r \sim N(0,\sigma_r^2)$$
+
+
+Each reef has a number $nH_{kl}$ of constituent holes (typically 3 for our data) and the reef mean generates observations for each hole.
+
+$$ x_{jkl} = r_{kl} + \zeta_h, j = 1,\ldots, nH_{kl}, k = 1,\ldots, nR_l, l = 1,\ldots, nL, \zeta_h \sim N(0,\sigma_h^2)$$
+Finally, for each hole there are actuall two depths and one would expect the deeper sample to be older than the sample above it. We model the offset $d$ and report its posterior distribution.
+We are interested in comparing its variance $\sigma_d^2$ with the other sigmas. 
+
+$$ y_{jkl} = d + x_{jkl} $$
+$$ y_{jkl}-x_{jkl} \sim N(\mu_d, \sigma_d^2)  $$
+
+```{r}
+suppressPackageStartupMessages(library(tidyverse))
+suppressPackageStartupMessages(library(magrittr))
+suppressPackageStartupMessages(library(lme4))
+suppressPackageStartupMessages(library(cmdstanr))
+```
+ 
+ Let's simulate a data set from this model.
+ 
+ Generate a number of localities from the Region (we are thinking an average of 11)
+ We also pick a regional mean age, c
+ 
+```{r}
+set.seed(1234)
+  nL = 11
+  c = 30
+```
+
+Generate means for each locality
+$\sigma_c = 3$
+```{r}
+locality_sigma = 5
+c_l = c + rnorm(n = nL, mean = 0, s = locality_sigma)
+```
+
+Each locality has somewhere between 2 to 4 reefs.
+
+$nR$ tells how many reefs for each locality
+
+```{r}
+nR = round(runif(n = nL, min = 2, max = 4))
+
+```
+
+```{r}
+n = sum(nR)
+nRL = data.frame(Locality = integer(n), Reef = integer(n) )
+kk = 1
+for( ii in 1:nL){
+   for( jj in 1:nR[ii]){
+     nRL$Locality[kk] = ii
+     nRL$Reef[kk] = kk #jj need a unique identifier for each reef
+     kk = kk + 1}
+}
+rm(n)
+```
+Add locality and reef means
+```{r}
+reef_sigma = 2
+nRL %<>% mutate(locality_mean = 0, reef_mean = 0)
+kk = 1
+for( ii in 1:nL){
+   for( jj in 1:nR[ii]){
+     nRL$locality_mean[kk] = c_l[ii]
+     nRL$reef_mean[kk] = rnorm(n = 1, m = c_l[ii], s = reef_sigma )
+     kk = kk + 1}
+}
+```
+
+Each reef has three holes and the values for those holes are generate from the reef mean
+
+```{r}
+nRL %>% slice(rep(1:n(), each = 3)) -> nHRL # this triplicates the rows
+hole_sigma = 2
+depth_mean = 4; depth_sigma = 1
+nHRL %<>%  mutate( x = 0, y = 0)
+
+for( ii in 1:nrow(nHRL)){
+   nHRL$x[ii] = rnorm(n = 1, m = nHRL$reef_mean[ii], s = hole_sigma)
+   d = rnorm(n = 1, m = depth_mean, s = depth_sigma)
+   nHRL$y[ii] = d + nHRL$x[ii] 
+}
+
+```
+
+For completeness, add the Regional mean, c (wich in fact is the mean of the depth 1 age in a hole)
+
+```{r}
+nHRL %<>% mutate(regional_mean = c)
+```
+
+Now let's see if Stan can recover these values
+
+```{r}
+
+Data = list( N = nrow(nHRL),
+             Locality = nHRL$Locality,
+             Reef = nHRL$Reef,
+             Reef2Locality = nRL$Locality, 
+             x = nHRL$x,
+             y = nHRL$y,
+             nL = length(unique(nHRL$Locality)),
+             nR = length(unique(nHRL$Reef)))
+
+model <- cmdstan_model("GeoChron.stan")
+
+```
+
+```{r}
+
+fit = model$sample(data = Data,
+    seed = 1234,
+    chains = 8,
+    parallel_chains = 8,
+    refresh = 500,
+    iter_warmup = 1000, #3000,
+    iter_sampling = 5000,
+    thin =  1,
+    adapt_delta = 0.99)
+```
+
+do some comparisons with parameter values
+```{r}
+estimated_locality_means = as.numeric(apply(fit$draws("mu_locality"),3,mean))
+
+plot(c_l, estimated_locality_means);abline(0,1)
+```
+```{r}
+estimated_reef_means = as.numeric(apply(fit$draws("mu_reef"),3,mean))
+plot(nRL$reef_mean, estimated_reef_means); abline(0,1)
+```
+```{r}
+print(c(estimated_sigma_locality = as.numeric(apply(fit$draws("sigma_locality"),3,median)),locality_sigma))
+```
+
+```{r}
+print(c(estimated_sigma_reef = as.numeric(apply(fit$draws("sigma_reef"),3,median)),reef_sigma))
+```
+```{r}
+print(c(estimated_sigma_hole = as.numeric(apply(fit$draws("sigma_hole"),3,median)),hole_sigma))
+```
+
+```{r}
+print(c(estimated_depth = as.numeric(apply(fit$draws("d"),3,median)),depth_mean))
+```
+sigma_depth
+```{r}
+print(c(estimated_depth_sigma = as.numeric(apply(fit$draws("sigma_depth"),3,median)), depth_sigma))
+```
+mu_depth
+```{r}
+print(c(estimated_depth_mu = as.numeric(apply(fit$draws("mu_depth"),3,median)), depth_mean))
+```
+
+ 
+ 
+ 
+
