@@ -26,3 +26,21 @@ St. Andrews Aquatic Preserve|Drift algae|SAV_BB_AAP_olr_DA.rds|fixed|cond||(Inte
 St. Andrews Aquatic Preserve|Drift algae|SAV_BB_AAP_olr_DA.rds|fixed|cond||(Intercept)[4]|42.4990551916667|7.89198297045554|27.591445|58.668485
 St. Andrews Aquatic Preserve|Drift algae|SAV_BB_AAP_olr_DA.rds|fixed|cond||relyear|1.423421657|0.303468859145204|0.85053795|2.04731275
 St. Andrews Aquatic Preserve|Drift algae|SAV_BB_AAP_olr_DA.rds|ran_pars|cond|LocationID|sd__(Intercept)|2.44437651741667|0.684238204359059|1.35082775|4.028309
+Apalachicola National Estuarine Research Reserve|Halodule wrightii|SAV_BB_ANERR_olr_HW.rds|fixed|cond||(Intercept)[1]|-5.35419887|0.830671894582669|-7.01934775|-3.75624975
+Apalachicola National Estuarine Research Reserve|Halodule wrightii|SAV_BB_ANERR_olr_HW.rds|fixed|cond||(Intercept)[2]|-4.06424758733333|0.822316541357225|-5.7108155|-2.4730635
+Apalachicola National Estuarine Research Reserve|Halodule wrightii|SAV_BB_ANERR_olr_HW.rds|fixed|cond||(Intercept)[3]|-2.81388556606667|0.81211671085245|-4.4330035|-1.2476395
+Apalachicola National Estuarine Research Reserve|Halodule wrightii|SAV_BB_ANERR_olr_HW.rds|fixed|cond||(Intercept)[4]|-1.49759703107492|0.803214757916641|-3.11104575|0.0661124524999999
+Apalachicola National Estuarine Research Reserve|Halodule wrightii|SAV_BB_ANERR_olr_HW.rds|fixed|cond||relyear|-0.141128763666667|0.0339180175516057|-0.20840135|-0.0748927275
+Apalachicola National Estuarine Research Reserve|Halodule wrightii|SAV_BB_ANERR_olr_HW.rds|ran_pars|cond|LocationID|sd__(Intercept)|2.58612830333333|0.332958690231318|2.017329|3.30588175
+Apalachicola National Estuarine Research Reserve|Syringodium filiforme|SAV_BB_ANERR_olr_SF.rds|fixed|cond||(Intercept)[1]|3.82371276335455|3.06453342082827|-2.191553|9.91094575
+Apalachicola National Estuarine Research Reserve|Syringodium filiforme|SAV_BB_ANERR_olr_SF.rds|fixed|cond||(Intercept)[2]|9.41105361171408|3.46303763761918|2.760661|16.349925
+Apalachicola National Estuarine Research Reserve|Syringodium filiforme|SAV_BB_ANERR_olr_SF.rds|fixed|cond||relyear|0.237205371832317|0.143306912107179|-0.0356073699999999|0.52756195
+Apalachicola National Estuarine Research Reserve|Syringodium filiforme|SAV_BB_ANERR_olr_SF.rds|ran_pars|cond|LocationID|sd__(Intercept)|0.973378117696167|0.934037014594256|0.0379239825|3.218854
+Apalachicola National Estuarine Research Reserve|Halophila spp.|SAV_BB_ANERR_olr_HS.rds||||||||
+Apalachicola National Estuarine Research Reserve|Drift algae|SAV_BB_ANERR_olr_DA.rds|fixed|cond||(Intercept)[1]|-6.4284108513875|10.6100371077594|-30.5214425|15.4147775
+Apalachicola National Estuarine Research Reserve|Drift algae|SAV_BB_ANERR_olr_DA.rds|fixed|cond||(Intercept)[2]|-1.45207091441417|10.7287973995787|-21.7132225|22.7863975
+Apalachicola National Estuarine Research Reserve|Drift algae|SAV_BB_ANERR_olr_DA.rds|fixed|cond||(Intercept)[3]|-0.262030240565417|10.7362724245672|-20.47531|24.064
+Apalachicola National Estuarine Research Reserve|Drift algae|SAV_BB_ANERR_olr_DA.rds|fixed|cond||(Intercept)[4]|0.312814871555|10.7497926297031|-19.9777|24.90973
+Apalachicola National Estuarine Research Reserve|Drift algae|SAV_BB_ANERR_olr_DA.rds|fixed|cond||relyear|-0.571844609698767|0.604530448179371|-2.02423125|0.546791325
+Apalachicola National Estuarine Research Reserve|Drift algae|SAV_BB_ANERR_olr_DA.rds|ran_pars|cond|LocationID|sd__(Intercept)|9.09844926725|5.31761393384794|2.88938525|23.534405
+Apalachicola National Estuarine Research Reserve|Ruppia maritima|SAV_BB_ANERR_olr_RM.rds||||||||
