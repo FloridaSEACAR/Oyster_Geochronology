@@ -249,7 +249,9 @@ HOBSmap <- ggplot(data = FL, aes(lon, lat, group = group)) +
                   geom_sf(data = fwcoy_m, aes(fill = "firebrick"), color = "firebrick", lwd = 0.5, inherit.aes = FALSE) +
                   geom_text_repel(data = HOBSdat_loc, aes(Lon, Lat, label = Locality), size = 7*0.35, nudge_x = HOBSdat_loc$x_nudge, nudge_y = HOBSdat_loc$y_nudge, segment.size = 0.25, min.segment.length = 0.4, inherit.aes = FALSE) +
                   geom_point(data = HOBSdat_loc, aes(Lon, Lat), color = "black", fill = "yellow1", shape = 21, size = 1.5, stroke = 0.5, inherit.aes = FALSE) +
-                  coord_sf(xlim = c(-87.5, -79), ylim = c(24.5, 31)) +
+                  # coord_sf(xlim = c(-87.5, -79), ylim = c(24.5, 31)) +
+                  xlim(-87.5, -79) +
+                  ylim(24.5, 31) +
                   theme_bw() +
                   theme(panel.grid.major = element_blank(),
                         panel.grid.minor = element_blank(),
@@ -259,12 +261,36 @@ HOBSmap <- ggplot(data = FL, aes(lon, lat, group = group)) +
                         legend.background = element_rect(fill = "transparent"),
                         legend.key = element_rect(colour = NA, fill = NA),
                         legend.key.size = unit(1,"line"),
-                        text = element_text(size = 7)) +
+                        text = element_text(size = 7),
+                        plot.margin = unit(c(0, 0, 0, 0), "mm")) +
                   labs(x = "Lat.", y = "Lon.") +
                   scale_fill_manual(name = NULL,
                                     labels = c("FDEP ORCP managed areas", "Mapped oyster reefs (not to scale)"),
                                     values = c("dodgerblue", "firebrick"),
                                     guide = guide_legend(override.aes = list(color = "grey10", lwd = 0.25)))
+
+refbox <- data.table(lat = c(rep(HOBSmap$coordinates$limits$x[1], 2), rep(HOBSmap$coordinates$limits$x[2], 2)), lon = c(HOBSmap$coordinates$limits$y, HOBSmap$coordinates$limits$y[2], HOBSmap$coordinates$limits$y[1]))
+refbox2 <- st_as_sf(refbox, coords = c("lat", "lon"), crs = st_crs(4326))
+refbox3 <- st_combine(refbox2)
+refbox4 <- st_cast(refbox3, "POLYGON")
+
+inset <- ggplot() +
+  geom_sf(data = subset(world_map_data, world_map_data$continent %in% c("North America")), lwd = 0.25, fill = "grey75", color = "grey75") +
+  geom_sf(data = refbox4, lwd = 1, color = "black", fill = "transparent") +
+  # coord_sf(xlim = c(-175, -15), ylim = c(-55, 85)) +
+  xlim(-170, -15) +
+  # ylim(-55, 85) + # w/ South America
+  ylim(10, 85) + # w/o South America
+  theme_void() +
+  theme(plot.margin = unit(c(0, 0, 0, 0), "mm"),
+        plot.background = element_rect(color = "black", size = 1))
+
+layout = c(
+  area(t = 1, l = 1, b = 50, r = 60),
+  area(t = 30, l = 2, b = 48, r = 21)
+)
+
+HOBSmap + inset + plot_layout(design = layout)
 
 ggsave(here::here("HOBSmap.pdf"),
        HOBSmap,
@@ -348,6 +374,8 @@ dev.off()
 
 
 #Geology paper figure DR1
+setDT(LPvHP_dat2)
+LPvHP_dat2[, Loc := factor(Loc, levels = c("LSG", "LB", "HC-MC", "NP", "PC", "GR"))]
 LPvHPplot <- ggplot() +
   scale_color_brewer(palette = "Accent", aesthetics = "fill") +
   geom_point(data = LPvHP_dat2, aes(F14C_HP, F14C_LP, fill = Loc), shape = 21, color = "black", size = 2.5) +
@@ -1376,11 +1404,13 @@ dev.off()
 }
 
 
-vlines2 <- data.frame(xint = c(median(subset(sampsum, sampsum$depth == "15-25")$median_age_bp), 
-                              median(subset(sampsum, sampsum$depth == "25-35")$median_age_bp)), 
-                     depth = c('15-25cm', '25-35cm'))
-
 #Time-averaging by median sample age (True sample version)
+
+vlines2 <- data.frame(depth = c('15-25cm', '25-35cm'), 
+                      xint_mean = c(mean(subset(sampsum, sampsum$depth == "15-25")$median_age_bp), 
+                                    mean(subset(sampsum, sampsum$depth == "25-35")$median_age_bp)),
+                      xint_med = c(median(subset(sampsum, sampsum$depth == "15-25")$median_age_bp), 
+                                   median(subset(sampsum, sampsum$depth == "25-35")$median_age_bp)))
 
 Ketal <- data.frame(median_age_bp = 1058, Sample_corrected_posterior_age_estimate = 1830)
 label1 <- c(expression(atop(NA, atop(textstyle('Kowalewski et al. 2018'), 
@@ -1430,30 +1460,39 @@ ggplot(sampsum, aes(x = median_age_bp, y = Sample_corrected_posterior_age_estima
 dev.off()
 
 #Geology paper figure 4-------------------------------------------------------------------------------
+log10_rev_trans <- scales::trans_new(
+  "log10_rev",
+  transform = function(x) -1 * (log10(x)),
+  inverse = function(x) 10 ^ abs(x),
+  scales::log_breaks(5),
+  domain = c(1e-100, Inf)
+)
+
 TAscalecompare <- ggplot(sampsum, aes(x = median_age_bp, y = Sample_corrected_posterior_age_estimate)) +
   theme_classic(base_size = 7, base_family = "Arial") +
   scale_fill_discrete_qualitative(palette = "Harmonic") +
   scale_color_discrete_qualitative(palette = "Harmonic") +
   geom_hline(yintercept = c(1, 10, 100, 1000), lwd = 0.25) +
-  geom_vline(data = vlines2, aes(xintercept = xint, color = depth), lwd = 0.5, show.legend = FALSE) +
-  geom_point(aes(fill = depth, shape = "This study"), color = "black", size = 1.5) +
-  geom_point(data = Ketal, aes(shape = "Kowalewski et al. (2018)"), fill = 'dark grey', color = 'black', size = 1.5) +
+  geom_vline(data = vlines2, aes(xintercept = xint_mean, color = depth), lwd = 0.5, show.legend = FALSE) +
+  geom_hline(data = vlines2, aes(yintercept = xint_mean, color = depth), lwd = 0.5, show.legend = FALSE) +
+  geom_point(aes(fill = depth, shape = "This study"), color = "black", size = 1.75, stroke = 1) +
+  geom_point(data = Ketal, aes(shape = "Kowalewski et al. (2018)"), fill = 'grey80', color = 'black', size = 1.75, stroke = 1) +
   #annotate('text', x = Ketal$median_age_bp[1] - 250, y = Ketal$Sample_corrected_posterior_age_estimate[1] + 1500, 
   #         label = label1) +
-  geom_point(data = Detal, aes(shape = "Dominguez et al. (2016)"), fill = 'dark grey', color = 'black', size = 1.5) +
+  geom_point(data = Detal, aes(shape = "Dominguez et al. (2016)"), fill = 'grey80', color = 'black', size = 1.75, stroke = 1) +
   #annotate('text', x = Detal$median_age_bp[6] - 250, y = Detal$Sample_corrected_posterior_age_estimate[6] + 1700, 
   #         label = label2) +
-  geom_point(data = Retal, aes(shape = "Ritter et al. (2017)"), fill = 'dark grey', color = 'black', size = 1.5) +
-  geom_point(data = Tetal[depth >= 10 & depth <= 35, ], aes(x = medage, y = corIQR, shape = "Toma\u{161}ov\u{FD}ch et al. (2018)"), fill = 'dark grey', color = 'black', size = 1.5) +
-  scale_y_continuous(trans='log10') +
-  scale_x_reverse() +
+  geom_point(data = Retal, aes(shape = "Ritter et al. (2017)"), fill = 'grey80', color = 'black', size = 1.75, stroke = 1) +
+  geom_point(data = Tetal[depth >= 10 & depth <= 35, ], aes(x = medage, y = corIQR, shape = "Toma\u{161}ov\u{FD}ch et al. (2018)"), fill = 'grey80', color = 'black', size = 1.75, stroke = 1) +
+  scale_y_continuous(trans = scales::log10_trans()) +
+  scale_x_continuous(trans = log10_rev_trans) +
   labs(x = 'Median age (bp)',
        y = 'Time averaging estimate (yr)',
        fill = 'Burial depth (cm)',
        shape = "") + 
   scale_shape_manual(values = c("This study" = 21, "Kowalewski et al. (2018)" = 22, "Dominguez et al. (2016)" = 23, "Ritter et al. (2017)" = 24, "Toma\u{161}ov\u{FD}ch et al. (2018)" = 25),
                      breaks = c("This study", "Dominguez et al. (2016)", "Ritter et al. (2017)", "Kowalewski et al. (2018)", "Toma\u{161}ov\u{FD}ch et al. (2018)")) +
-  guides(fill=guide_legend(override.aes=list(shape=21))) +
+  guides(fill = guide_legend(override.aes = list(shape = 15, size = 5, color = hcl.colors(palette = "Harmonic", n = 2)))) +
   theme(axis.title = element_text(size = 7), 
         axis.text = element_text(size = 7, colour = "black"), 
         legend.text = element_text(size = 7), 
@@ -1463,42 +1502,6 @@ TAscalecompare <- ggplot(sampsum, aes(x = median_age_bp, y = Sample_corrected_po
         panel.grid.major.y = element_line(size = 0.25, color = "black"),
         #panel.grid.minor.y = element_line(size = 0.25),
         axis.line = element_line(size = 0.25))
-
-
-
-theme_bw(base_size = 7, base_family = "Arial") +
-  #scale_color_manual(values = reefcols, aesthetics = c("color", "fill")) +
-  # geom_errorbar(aes(xmin = ifelse(median_age_bp - (Sample_corrected_posterior_age_estimate/2) < 0, 0, median_age_bp - (Sample_corrected_posterior_age_estimate/2)), 
-  #                   xmax = ifelse(median_age_bp - (Sample_corrected_posterior_age_estimate/2) < 0, Sample_corrected_posterior_age_estimate, median_age_bp + (Sample_corrected_posterior_age_estimate/2)), color = depth),
-  #               position = position_dodge(width = 0.5), width = 0.3, key_glyph = "rect", lwd = 0.25) +
-  # geom_point(aes(size = Sample_n), position = position_dodge(width = 0.5), color = "black", key_glyph = "rect") +
-    geom_errorbar(aes(xmin = ifelse(median_age_bp - (Sample_corrected_posterior_age_estimate/2) < 0, 0, median_age_bp - (Sample_corrected_posterior_age_estimate/2)), 
-                    xmax = ifelse(median_age_bp - (Sample_corrected_posterior_age_estimate/2) < 0, Sample_corrected_posterior_age_estimate, median_age_bp + (Sample_corrected_posterior_age_estimate/2)), color = depth, group = sample),
-                position = position_dodge(0.5), width = 0.3, key_glyph = "rect", lwd = 0.25) +
-  geom_point(aes(size = Sample_n, group = sample), position = position_dodge(0.5), color = "black", key_glyph = "rect") +
-  geom_point(aes(y = NA, x = ylim_low, size = Sample_n, group = sample), color = "black") +
-  geom_point(aes(y = NA, x = ylim_high, size = Sample_n, group = sample), color = "black") +
-  scale_x_log10() +
-  scale_y_discrete(limits = rev, breaks = c(1, 2, 3, 4, 5), labels = c(1, 2, 3, 4, 4)) +
-  scale_shape_manual(values = c("Hole 1" = 21, "Hole 2" = 22, "Hole 3" = 24)) +
-  scale_size_manual(values = c(0.6, 0.8, 1, 1.2, 1.4, 1.6), breaks = c(2:7)) +
-  scale_fill_discrete_qualitative(palette = "Harmonic") +
-  scale_color_discrete_qualitative(palette = "Harmonic") +
-  labs(y = "Reef", #'Burial depth (cm)',
-       x = 'Median age (bp)', #) +
-       shape = 'Sample hole',
-       color = "Burial depth (mm)",
-       fill = "Burial depth (mm)", 
-       size = "Sample size") +
-  theme(panel.grid.major.x = element_line(color = "black"), 
-        panel.grid.minor.x = element_line(linetype = "blank"), 
-        panel.grid.major.y = element_line(color = "grey80"), 
-        panel.grid.minor.y = element_line(color = "grey80"),
-        axis.text = element_text(size = 7),
-        axis.line = element_line(),
-        legend.text = element_text(size = 7),
-        legend.key.size = unit(1,"line"),
-        panel.background = element_rect(fill = NA)) +
 
 ggsave(here::here("TAscalecompare.pdf"),
        TAscalecompare,
@@ -1659,6 +1662,7 @@ sampsum[, reef_lab := fcase(locality == "GI-EC" & reef == 4, 3L,
                             locality == "LC" & reef == 5, 4L,
                             locality == "MR" & reef == 2, 1L,
                             locality == "MR" & reef == 3, 2L)][is.na(reef_lab), reef_lab := reef]
+sampsum[, locality := factor(locality, levels = c("LSG", "GI-EC", "LC", "LB", "HC-MC", "NP", "BH", "JI", "PC", "MR", "GR"))]
 
 medagebysample <- ggplot(sampsum, aes(x = median_age_bp, y = as.character(reef_lab), shape = holeN3, fill = depth)) +
   theme_bw(base_size = 7, base_family = "Arial") +
