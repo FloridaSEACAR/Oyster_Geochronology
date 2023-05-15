@@ -1,0 +1,150 @@
+---
+title: "New Goose Island EC Reef 4"
+output: html_notebook
+---
+
+
+```{r}
+library(tidyverse)
+library(magrittr)
+library(reshape2)
+library(HDInterval)
+library(readxl)
+library(oxcAAR)
+setOxcalExecutablePath("/Users/johnhandley/Documents/PaleontologyResearch/Oysters/HOBS/Contract work/OxCal/bin/OxCalMac")
+```
+```{r}
+source("Utilities.R")
+```
+
+Helper function to creat calendar dates from fractions madern
+```{r}
+source("write_oxcal_sum_script.R")
+oxcARR_Calibration = function(fractions, sample_name = "TEST", curvename = "bombBahamasto10000calBP_Marine20",curvepath = "/Users/johnhandley/Documents/PaleontologyResearch/Oysters/HOBS/Contract work/OxCal/bombBahamasto10000calBP_Marine20.14c"){
+
+shell_names = unique(fractions$name)
+code = write_oxcal_sum_script(fractions, path = "OxCal_Sum_scripts", filename = sample_name,curvename = curvename,curvepath = curvepath)
+    
+    
+    my_result_file <- executeOxcalScript(code) # looks like it stores it in JSON
+    my_result_text <- readOxcalOutput(my_result_file)
+    
+    #Or you get the whole output of Oxcal as object:
+    
+    #my_result_data <- parseFullOxcalOutput(my_result_text)
+    my_result_data = parseOxcalOutput(my_result_text, only.R_Date = F)
+    
+    local_posterior_distribution = data.frame() # one per object
+    for( p in my_result_data) {
+      
+        if( p$name %in% c(shell_names,"Sum"))
+        {
+          df = data.frame(year = p$raw_probabilities$dates,
+                          probability = p$raw_probabilities$probabilities/sum( p$raw_probabilities$probabilities))
+          df %<>% mutate(name = p$name)
+          local_posterior_distribution = rbind(local_posterior_distribution, df)
+        }
+      
+    }
+    
+return(local_posterior_distribution)
+}
+```
+
+Get the new samples
+
+```{r}
+Durham_GAS_April24_2023 = read_xlsx("Durham_GAS 14C results_April 24 2023.xlsx", skip = 1)
+Durham_GAS_April24_2023 %<>% select("Sample ID", "Modern","±...5")
+Durham_GAS_April24_2023 %<>% na.omit()
+names(Durham_GAS_April24_2023) = c("name","f14C", "f14C_sd")
+Durham_GAS_April24_2023 %<>% mutate(Sample_code = as.character(data.frame(strsplit(name, " "))[1,]))
+```
+
+```{r}
+SpecNames_Xwalk = read.csv("SpecNames_Xwalk.csv")
+```
+Looks like Station 8848
+```{r}
+SpecNames_Xwalk %>% filter(grepl("GI-EC_R4H3S1", Sample_ID))
+```
+
+```{r}
+Durham_GAS_April24_2023 %>% filter(grepl("GI-EC_R4H3S1", name)) -> GI_EC_R4_New
+```
+
+Get the original HOBS data; S1 corresponds to "15-25cm"
+```{r}
+
+HOBSGeo_Apps_202208_final = read_xlsx("HOBSGeo_Apps_202208_final.xlsx", sheet = "DR3", skip = 31 )
+HOBSGeo_Apps_202208_final %>% filter(Locality == "Goose Island/East Cove" & Depth == "15-25cm") -> GI_EC_R4_Old
+GI_EC_R4_Old %<>% filter(Station == 8848 ) %>% select(Cat_No,F14C_corr,F14C_corr_sd,Depth,Station)
+names(GI_EC_R4_Old) = c("name", "F14C_corr","F14C_corr_sd","Depth","Station")
+```
+
+Run the old through the Calibration
+```{r}
+GI_EC_R4_Old_posteriors = oxcARR_Calibration(GI_EC_R4_Old, sample_name = "GI_EC_R4_Old")
+```
+
+```{r}
+GI_EC_R4_Old_posteriors %>% filter(name != "Sum") %>% ggplot(aes(x = year, y = probability, color = name)) + geom_line(show.legend = FALSE) + xlim(c(1130,2020))
+```
+
+Run the new through the Calibration
+```{r}
+GI_EC_R4_New_posteriors = oxcARR_Calibration(GI_EC_R4_New, sample_name = "GI_EC_R4_New")
+```
+
+```{r}
+GI_EC_R4_New_posteriors %>% filter(name != "Sum") %>% ggplot(aes(x = year, y = probability, color = name)) + geom_line(show.legend = FALSE)+ xlim(c(1950,2020))
+```
+Remember these are from GI-EC_R4H3S1
+total of 25 shells
+```{r}
+Goose_Island_East_Cove_R4H3S1 = rbind(GI_EC_R4_Old_posteriors %>% filter(name != "Sum"),GI_EC_R4_New_posteriors %>% filter(name != "Sum"))
+```
+
+```{r}
+Goose_Island_East_Cove_R4H3S1_names = unique((Goose_Island_East_Cove_R4H3S1  %>% select(name))$name) 
+Goose_Island_East_Cove_R4H3S1_results = data.frame()
+ set.seed(1234)
+for( n in 2:length(Goose_Island_East_Cove_R4H3S1_names)){
+     for( ii in 1:100){
+        random_sample = sample(Goose_Island_East_Cove_R4H3S1_names, size = n, replace = FALSE)
+        tmp = Goose_Island_East_Cove_R4H3S1 %>% filter(name %in% random_sample)
+        Goose_Island_East_Cove_R4H3S1_results = rbind(Goose_Island_East_Cove_R4H3S1_results
+            , data.frame( n = n, cpe = CPE(tmp)$cpe, tav_iqr =CPE(tmp)$tav_iqr, cr_0.95 = CR_95_TAV(tmp), tav_hdi = HDI_95_TAV(tmp))) #, ETA = ETA(tmp) ))
+     }
+}
+ write_rds(Goose_Island_East_Cove_R4H3S1_results,"Goose_Island_East_Cove_R4H3S1_results.RDS")
+```
+
+```{r}
+Goose_Island_East_Cove_R4H3S1_results %>% reshape2::melt("n") %>% ggplot(aes(x = n, y = value)) + geom_jitter(width = 0.2) + geom_smooth(color = "orange") + facet_wrap(~variable) + ggtitle("Goose Island/East Cove Reef 4")
+```
+
+```{r}
+pop_values = last(Goose_Island_East_Cove_R4H3S1_results)
+cpe.tmp = Goose_Island_East_Cove_R4H3S1_results %>% group_by(n) %>% dplyr::summarize( cpe_Bias = Bias(cpe, pop_values$cpe), cpe_SD = StandardDeviation(cpe, pop_values$cpe), cpe_CV =  StandardDeviation(cpe, pop_values$cpe)/pop_values$cpe)
+
+tav_iqr.tmp = Goose_Island_East_Cove_R4H3S1_results %>% group_by(n) %>% dplyr::summarize( tav_iqr_Bias = Bias(tav_iqr, pop_values$tav_iqr), tav_iqr_SD = StandardDeviation(tav_iqr, pop_values$tav_iqr), tav_iqr_CV =  StandardDeviation(tav_iqr, pop_values$tav_iqr)/pop_values$tav_iqr) %>% select(-n)
+
+cr_0.95.tmp = Goose_Island_East_Cove_R4H3S1_results %>% group_by(n) %>% dplyr::summarize( cr_0.95_Bias = Bias(cr_0.95, pop_values$cr_0.95), cr_0.95_SD = StandardDeviation(cr_0.95, pop_values$cr_0.95), cr_0.95_CV =  StandardDeviation(cr_0.95, pop_values$cr_0.95)/pop_values$cr_0.95)%>% select(-n)
+
+tav_hdi.tmp = Goose_Island_East_Cove_R4H3S1_results %>% group_by(n) %>% dplyr::summarize( tav_hdi_Bias = Bias(tav_hdi, pop_values$tav_hdi), tav_hdi_SD = StandardDeviation(tav_hdi, pop_values$tav_hdi), tav_hdi_CV =  StandardDeviation(tav_hdi, pop_values$tav_hdi)/pop_values$tav_hdi)%>% select(-n)
+
+Goose_Island_East_Cove_R4H3S1_summary = round(cbind(cpe.tmp,tav_iqr.tmp,cr_0.95.tmp,tav_hdi.tmp), 3)
+Goose_Island_East_Cove_R4H3S1_summary
+```
+
+```{r}
+Goose_Island_East_Cove_R4H3S1_summary %>% select(n,contains("Bias")) %>% melt("n") %>% ggplot(aes(x = n, y = value, color = variable)) + geom_line()+ ylab("Bias") + ggtitle("Goose Island/East Cove Reef 4")
+```
+```{r}
+Goose_Island_East_Cove_R4H3S1_summary %>% select(n,contains("SD")) %>% melt("n") %>% ggplot(aes(x = n, y = value, color = variable)) + geom_line() + ylab("SD")+ ggtitle("Goose Island/East Cove Reef 4")
+```
+
+```{r}
+Goose_Island_East_Cove_R4H3S1_summary %>% select(n,contains("CV")) %>% melt("n") %>% ggplot(aes(x = n, y = value, color = variable)) + geom_line()+ ylab("CV")+ ggtitle("Goose Island/East Cove Reef 4")
+```

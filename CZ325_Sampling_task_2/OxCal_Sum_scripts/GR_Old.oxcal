@@ -1,0 +1,27 @@
+ 
+Options()
+ {
+  Resolution=0.5;
+  
+Curve="/Users/johnhandley/Documents/PaleontologyResearch/Oysters/HOBS/Contract work/OxCal/bombBahamasto10000calBP_Marine20.14c";
+};
+
+ Plot()
+ {
+ 
+Curve("bombBahamasto10000calBP_Marine20","/Users/johnhandley/Documents/PaleontologyResearch/Oysters/HOBS/Contract work/OxCal/bombBahamasto10000calBP_Marine20.14c");
+
+  sum("Sum")
+  {
+  
+
+R_F14C("PRI103657",1.034771,0.022061);
+
+R_F14C("PRI103658",1.031573,0.021991);
+
+R_F14C("PRI103659",1.034586,0.022206);
+
+
+  };
+ };
+

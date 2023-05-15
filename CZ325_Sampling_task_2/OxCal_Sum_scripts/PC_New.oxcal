@@ -1,0 +1,57 @@
+ 
+Options()
+ {
+  Resolution=0.5;
+  
+Curve="/Users/johnhandley/Documents/PaleontologyResearch/Oysters/HOBS/Contract work/OxCal/bombBahamasto10000calBP_Marine20.14c";
+};
+
+ Plot()
+ {
+ 
+Curve("bombBahamasto10000calBP_Marine20","/Users/johnhandley/Documents/PaleontologyResearch/Oysters/HOBS/Contract work/OxCal/bombBahamasto10000calBP_Marine20.14c");
+
+  sum("Sum")
+  {
+  
+
+R_F14C("PC_R3H2S2 27",0.963920,0.009308);
+
+R_F14C("PC_R3H2S2 74",0.927979,0.007604);
+
+R_F14C("PC_R3H2S2 41",0.952612,0.007753);
+
+R_F14C("PC_R3H2S2 2",0.943424,0.008072);
+
+R_F14C("PC_R3H2S2 177",0.913828,0.007643);
+
+R_F14C("PC_R3H2S2 109",0.959612,0.008072);
+
+R_F14C("PC_R3H2S2 180",0.964019,0.007886);
+
+R_F14C("PC_R3H2S2 145",0.950870,0.007944);
+
+R_F14C("PC_R3H2S2 7",1.047921,0.008499);
+
+R_F14C("PC_R3H2S2 140",0.913081,0.007675);
+
+R_F14C("PC_R3H2S2 35",0.926274,0.008997);
+
+R_F14C("PC_R3H2S2 153",1.143683,0.009037);
+
+R_F14C("PC_R3H2S2 112",1.193204,0.009419);
+
+R_F14C("PC_R3H2S2 157",0.934326,0.007691);
+
+R_F14C("PC_R3H2S2 40",0.942914,0.007841);
+
+R_F14C("PC_R3H2S2 56",1.075207,0.008523);
+
+R_F14C("PC_R3H2S2 142",0.920929,0.007679);
+
+R_F14C("PC_R3H2S2 64",0.925755,0.007688);
+
+
+  };
+ };
+
