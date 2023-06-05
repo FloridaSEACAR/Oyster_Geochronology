@@ -1,0 +1,52 @@
+---
+title: "Driver"
+output: html_notebook
+---
+
+Explore the results from using Heaton's nonparametric approach on Kowlewski's data 
+```{r}
+library(tidyverse)
+library(magrittr)
+library(reshape2)
+library(rintcal)
+
+```
+
+Read in Kowalewski's ages
+```{r}
+
+KowalewskiAges = read_csv("Curves/KowalewskiAges.csv")
+
+```
+Convert to fractions
+```{r}
+# 
+tmp = data.frame()
+for( ii in 1:nrow(KowalewskiAges))
+  tmp = rbind(tmp, age.F14C(mn = KowalewskiAges$carbonateAge[ii], sdev = KowalewskiAges$carbonateErr[ii]))
+
+KowalewskiAges = cbind(KowalewskiAges %>% dplyr::select(taxon, sample), tmp)
+KowalewskiAges %>% filter(taxon == "Leodia") %>% dplyr::select(-taxon) %>% write.csv("Curves/LeodiaAges.csv", row.names = FALSE)
+KowalewskiAges %>% filter(taxon == "Tucetona") %>% dplyr::select(-taxon) %>% write.csv("Curves/TucetonaAges.csv", row.names = FALSE)
+```
+
+
+
+Read in the data which have been converted to fractions modern when needed
+```{r}
+LeodiaAges = read.csv("Curves/LeodiaAges.csv")
+Curve = read.table("Curves/bombBahamasto10000calBP.14c", sep = "\t", header=TRUE)
+```
+
+Perform the estimation
+WalkerNPSamples is a matrix with # rows = # years, # columns = samples after burn-in
+```{r}
+source("WalkerNonParametricCalibration.R")
+system.time((LeodiaAgesCalibrations = WalkerNonParametricCalibration(Curve = Curve, Determinations = LeodiaAges)))
+
+```
+
+```{r}
+LeodiaAgesCalibrations %>% reshape2::melt("calage") %>% ggplot(aes(x = calage, y = value, color = variable)) + geom_line()
+
+```
