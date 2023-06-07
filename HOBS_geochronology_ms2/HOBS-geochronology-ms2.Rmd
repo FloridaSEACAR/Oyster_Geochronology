@@ -81,19 +81,14 @@ library(colorspace)
 library(brms)
 library(patchwork)
 library(ragg)
-library(scales)
 
 #See this link for converting this document to Word format: https://www.joelnitta.com/post/rmd-to-docx/. I used the following function based on the suggested methods at the link: pandoc_convert(here::here("HOBS_geochronology_ms2/ms2.tex"), to = "docx", output = here::here("HOBS_geochronology_ms2/ms2.docx"), citeproc = T)
 
 HOBSdat <- fread(here::here("ID5035_HOBS_MasterDataFile_Invoice6_final_inc14C.csv"))
-fmoddat <- fread(here::here("HOBS_geochronology_ms2/Data/14C_03042022_AllR.csv"))
-fmoddat[str_detect(OtherID, "S1_"), OtherID := str_replace(OtherID, "S1_", "S1-")]
-fmoddat[str_detect(OtherID, "S2_"), OtherID := str_replace(OtherID, "S2_", "S2-")]
-#sampsum  <- fread(here::here('sampleSummary_2022-03-04.csv'))
-sampsum  <- fread(here::here('sampleSummary_2022-07-02.csv'))
-posteriors <- fread(here::here('HOBS_Posteriors_all_Marine20update.csv')) #formerly specdat
-#specsum <- fread(here::here('specimenSummary_2022-03-04.csv'))
-specsum <- fread(here::here('specimenSummary_2022-07-02.csv'))
+fmoddat <- fread(here::here("HOBS_geochronology_ms2/Data/14C_01022021_AllR.csv"))
+sampsum  <- fread(here::here('sampleSummary_2021-10-20.csv'))
+posteriors <- fread(here::here('HOBS_Posteriors_all.csv')) #formerly specdat
+specsum <- fread(here::here('specimenSummary_2021-10-20.csv'))
 MKetal_posteriors <- fread(here::here('AppendixDR2_PosteriorDistributions_dataonly.csv'))
 MKetal_specsum <- fread(here::here('AppendixDR1_dataSummaryTable_dataonly.csv'))
 pricats <- fread(here::here("HOBS_Geochronology_DAspecimensVWW.csv"))
@@ -126,53 +121,6 @@ for(i in seq_along(locs_abbrev)){
   posteriors <- posteriors %>% dplyr::mutate_at(c("loc"), stringr::str_replace_all, pattern = locs_abbrev[i], replacement = locs_abbrev_corr[i])
 }
 posteriors$reefID <- paste0(posteriors$loc, " R", posteriors$reef)
-
-#Remove Lemon Bay data because the dead C correction was not based on radiocarbon analyses of live specimens
-HOBSdat <- HOBSdat[Locality != "Lemon Bay", ]
-fmoddat <- fmoddat[Loc != "LB", ]
-
-#Make sure that geochronology results in "HOBSdat" match the "sampsum" and "fmoddat" versions being used
-fmoddat[, OtherID2 := fcase(str_detect(OtherID, "S1-"), str_replace(OtherID, "S1-", "S1_"),
-                            str_detect(OtherID, "S2-"), str_replace(OtherID, "S2-", "S2_")), by = OtherID]
-
-HOBSdat[, `:=` (LP14C_Fmvalue = ifelse(Spec_ID %in% unique(fmoddat$OtherID2), fmoddat[OtherID2 == Spec_ID & Analysis == "LP", F14C], NA),
-                LP14C_FMerror = ifelse(Spec_ID %in% unique(fmoddat$OtherID2), fmoddat[OtherID2 == Spec_ID & Analysis == "LP", F14C_sd], NA),
-                LP14C_FMvalue_DeadCorr = ifelse(Spec_ID %in% unique(fmoddat$OtherID2), fmoddat[OtherID2 == Spec_ID & Analysis == "LP", F14C_corr], NA),
-                LP14C_FMerror_DeadCorr = ifelse(Spec_ID %in% unique(fmoddat$OtherID2), fmoddat[OtherID2 == Spec_ID & Analysis == "LP", F14C_corr_sd], NA),
-                LP14C_CalAge_95CILow_DeadCorr = ifelse(Spec_ID %in% unique(fmoddat$OtherID2), fmoddat[OtherID2 == Spec_ID & Analysis == "LP", `95CI_low`], NA),
-                LP14C_CalAge_95CIHigh_DeadCorr = ifelse(Spec_ID %in% unique(fmoddat$OtherID2), fmoddat[OtherID2 == Spec_ID & Analysis == "LP", `95CI_high`], NA),
-                LP14C_CalAge_Median = ifelse(Spec_ID %in% unique(fmoddat$OtherID2), fmoddat[OtherID2 == Spec_ID & Analysis == "LP", Median], NA),
-                HP14C_FMvalue = ifelse(Spec_ID %in% unique(fmoddat$OtherID2), fmoddat[OtherID2 == Spec_ID & Analysis == "HP", F14C], NA),
-                HP14C_FMerror = ifelse(Spec_ID %in% unique(fmoddat$OtherID2), fmoddat[OtherID2 == Spec_ID & Analysis == "HP", F14C_sd], NA),
-                HP14C_FMvalue_DeadCorr = ifelse(Spec_ID %in% unique(fmoddat$OtherID2), fmoddat[OtherID2 == Spec_ID & Analysis == "HP", F14C_corr], NA),
-                HP14C_FMerror_DeadCorr = ifelse(Spec_ID %in% unique(fmoddat$OtherID2), fmoddat[OtherID2 == Spec_ID & Analysis == "HP", F14C_corr_sd], NA),
-                HP14C_CalAge_95CILow_DeadCorr = ifelse(Spec_ID %in% unique(fmoddat$OtherID2), fmoddat[OtherID2 == Spec_ID & Analysis == "HP", `95CI_low`], NA),
-                HP14C_CalAge_95CIHigh_DeadCorr = ifelse(Spec_ID %in% unique(fmoddat$OtherID2), fmoddat[OtherID2 == Spec_ID & Analysis == "HP", `95CI_high`], NA),
-                HP14C_CalAge_Median = ifelse(Spec_ID %in% unique(fmoddat$OtherID2), fmoddat[OtherID2 == Spec_ID & Analysis == "HP", Median], NA)
-                ), by = Spec_ID]
-
-setnames(HOBSdat, colnames(HOBSdat)[which(str_detect(colnames(HOBSdat), "_\\(IQR\\)") | str_detect(colnames(HOBSdat), "age-estimation"))],
-         c(str_replace(colnames(HOBSdat)[which(str_detect(colnames(HOBSdat), "_\\(IQR\\)"))], "_\\(IQR\\)", "_IQR"), str_replace(colnames(HOBSdat)[which(str_detect(colnames(HOBSdat), "age-estimation"))], "-", "_")))
-
-setnames(sampsum, colnames(sampsum)[which(str_detect(colnames(sampsum), "_\\(IQR\\)") | str_detect(colnames(sampsum), "age-estimation"))],
-         c(str_replace(colnames(sampsum)[which(str_detect(colnames(sampsum), "_\\(IQR\\)"))], "_\\(IQR\\)", "_IQR"), str_replace(colnames(sampsum)[which(str_detect(colnames(sampsum), "age-estimation"))], "-", "_")))
-
-HOBSdat[, Sample_ID2 := paste0(str_sub(Sample_ID, 1, 2), str_sub(Sample_ID, str_locate(Sample_ID, "_")[1], -1)), by = Sample_ID]
-fmoddat[, samp := str_sub(OtherID2, 1, str_locate(OtherID2, "R.H.S.")[2]), by = OtherID2]
-
-
-HOBSdat[, Sample_n := nrow(fmoddat[Analysis == "LP" & samp == Sample_ID, ]), by = Sample_ID]
-HOBSdat[, `:=` (Sample_mean_age = sampsum[sample == Sample_ID2, Sample_mean_age],
-                Sample_median_age = sampsum[sample == Sample_ID2, Sample_median_age],
-                Sample_age_range = sampsum[sample == Sample_ID2, Sample_age_range],
-                Sample_minimum_age = sampsum[sample == Sample_ID2, Sample_minimum_age],
-                Sample_maximum_age = sampsum[sample == Sample_ID2, Sample_maximum_age],
-                Sample_median_specimen_age_variability_IQR = sampsum[sample == Sample_ID2, Sample_median_specimen_age_variability_IQR],
-                Sample_total_age_variability_IQR = sampsum[sample == Sample_ID2, Sample_total_age_variability_IQR],
-                Sample_median_specimen_age_estimation_error = sampsum[sample == Sample_ID2, Sample_median_specimen_age_estimation_error],
-                Sample_corrected_posterior_age_estimate = sampsum[sample == Sample_ID2, Sample_corrected_posterior_age_estimate]
-                ), by = Sample_ID2]
-HOBSdat[, `:=` (Sample_age_stdev = NULL, Sample_ID2 = NULL)]
 
 
 ```
@@ -214,7 +162,6 @@ We focused our sampling on 11 different areas around the state that corresponded
 
 HOBSdat <- subset(HOBSdat, !is.na(HOBSdat$Sample_n))
 HOBSdat[Locality == "Jack Island/Wildcat Cove", Locality := "Jack Island"]
-HOBSdat[str_detect(Locality, "Hendry/Mullock"), Locality := "Hendry/\nMullock Cr."]
 HOBSdat[ , Locality := str_replace_all(Locality, "Island", "Is.")]
 HOBSdat[ , Locality := str_replace_all(Locality, "Creek", "Cr.")]
 HOBSdat[ , Locality := str_replace_all(Locality, "River", "R.")]
@@ -244,9 +191,9 @@ HOBSdat_loc %>%
                              ,Locality == "Little St. George Is." ~ -1.7
                              ,Locality == "Lone Cabbage" ~ -1.4
                              ,Locality == "Lemon Bay" ~ -1.3
-                             ,Locality == "Hendry/\nMullock Cr." ~ -1.4
-                             ,Locality == "New Pass" ~ -1.4
-                             ,Locality == "Big Hickory" ~ -1.1
+                             ,Locality == "Hendry/Mullock Cr." ~ -2.1
+                             ,Locality == "New Pass" ~ -1.5
+                             ,Locality == "Big Hickory" ~ -1.4
                              ,Locality == "Jack Is." ~ 1.2
                              ,Locality == "Pellicer Cr." ~ 1.5
                              ,Locality == "Matanzas R." ~ 1.6
@@ -256,9 +203,9 @@ HOBSdat_loc %>%
                              ,Locality == "Little St. George Is." ~ -0.4
                              ,Locality == "Lone Cabbage" ~ -1
                              ,Locality == "Lemon Bay" ~ 0.2
-                             ,Locality == "Hendry/\nMullock Cr." ~ 0.2
-                             ,Locality == "New Pass" ~ -0.5
-                             ,Locality == "Big Hickory" ~ -1
+                             ,Locality == "Hendry/Mullock Cr." ~ 0.1
+                             ,Locality == "New Pass" ~ -0.3
+                             ,Locality == "Big Hickory" ~ -0.7
                              ,Locality == "Jack Is." ~ 0.2
                              ,Locality == "Pellicer Cr." ~ -0.2
                              ,Locality == "Matanzas R." ~ 0.1
@@ -266,31 +213,31 @@ HOBSdat_loc %>%
                              ,TRUE ~ 0)
   ) ->
   HOBSdat_loc
-# #Modeled after map here: https://www.sharpsightlabs.com/blog/mapping-texas-ports-with-geom_sf-part2/
-# png(file = here::here(paste0("HOBS_geochronology_ms2/Figures/HOBS_geochron_Fig1_", Sys.Date(), ".png")), width = 2000, height = 1500, res = 275)
-# ggplot(data = FL, aes(lon, lat, group = group)) +
-#   geom_sf(data = world_map_data, inherit.aes = FALSE) +
-#   geom_sf(data = state_map_data, inherit.aes = FALSE) +
-#   geom_sf(data = subset(state_map_data, state_map_data$ID == "florida"), fill = "antiquewhite1", inherit.aes = FALSE) +
-#   geom_sf(data = rcp_m, aes(fill = "dodgerblue"), color = "dodgerblue", alpha = 0.5, lwd = 0.5, inherit.aes = FALSE) +
-#   geom_sf(data = fwcoy_m, aes(fill = "firebrick"), color = "firebrick", lwd = 1.5, inherit.aes = FALSE) +
-#   geom_text_repel(data = HOBSdat_loc, aes(Lon, Lat, label = Locality), size = 13.5*0.35, nudge_x = HOBSdat_loc$x_nudge, nudge_y = HOBSdat_loc$y_nudge, inherit.aes = FALSE) +
-#   geom_point(data = HOBSdat_loc, aes(Lon, Lat), color = "black", fill = "yellow1", shape = 21, size = 3.5, stroke = 1.5, inherit.aes = FALSE) +
-#   coord_sf(xlim = c(-87.5, -79), ylim = c(24.5, 31)) +
-#   theme_bw() +
-#   theme(panel.background = element_rect(fill = "lightblue1"), 
-#         legend.title = element_blank(),
-#         legend.position = c(0.26, 0.1),
-#         legend.background = element_rect(fill = "transparent"),
-#         legend.key = element_rect(colour = NA, fill = NA),
-#         #legend.key.size = unit(0.5, "lines"),
-#         text = element_text(size = 13.5)) +
-#   labs(x = "Lat.", y = "Lon.") +
-#   scale_fill_manual(name = NULL,
-#                     labels = c("FDEP ORCP\nmanaged areas", "Mapped oyster\nreefs (not to scale)"),
-#                     values = c("dodgerblue", "firebrick"),
-#                     guide = guide_legend(override.aes = list(color = "grey10", lwd = 0.25)))
-# dev.off()
+#Modeled after map here: https://www.sharpsightlabs.com/blog/mapping-texas-ports-with-geom_sf-part2/
+png(file = here::here(paste0("HOBS_geochronology_ms2/Figures/HOBS_geochron_Fig1_", Sys.Date(), ".png")), width = 2000, height = 1500, res = 275)
+ggplot(data = FL, aes(lon, lat, group = group)) +
+  geom_sf(data = world_map_data, inherit.aes = FALSE) +
+  geom_sf(data = state_map_data, inherit.aes = FALSE) +
+  geom_sf(data = subset(state_map_data, state_map_data$ID == "florida"), fill = "antiquewhite1", inherit.aes = FALSE) +
+  geom_sf(data = rcp_m, aes(fill = "dodgerblue"), color = "dodgerblue", alpha = 0.5, lwd = 0.5, inherit.aes = FALSE) +
+  geom_sf(data = fwcoy_m, aes(fill = "firebrick"), color = "firebrick", lwd = 1.5, inherit.aes = FALSE) +
+  geom_text_repel(data = HOBSdat_loc, aes(Lon, Lat, label = Locality), size = 13.5*0.35, nudge_x = HOBSdat_loc$x_nudge, nudge_y = HOBSdat_loc$y_nudge, inherit.aes = FALSE) +
+  geom_point(data = HOBSdat_loc, aes(Lon, Lat), color = "black", fill = "yellow1", shape = 21, size = 3.5, stroke = 1.5, inherit.aes = FALSE) +
+  coord_sf(xlim = c(-87.5, -79), ylim = c(24.5, 31)) +
+  theme_bw() +
+  theme(panel.background = element_rect(fill = "lightblue1"), 
+        legend.title = element_blank(),
+        legend.position = c(0.26, 0.1),
+        legend.background = element_rect(fill = "transparent"),
+        legend.key = element_rect(colour = NA, fill = NA),
+        #legend.key.size = unit(0.5, "lines"),
+        text = element_text(size = 13.5)) +
+  labs(x = "Lat.", y = "Lon.") +
+  scale_fill_manual(name = NULL,
+                    labels = c("FDEP ORCP managed areas", "Mapped oyster reefs (not to scale)"),
+                    values = c("dodgerblue", "firebrick"),
+                    guide = guide_legend(override.aes = list(color = "grey10", lwd = 0.25)))
+dev.off()
 
 
 #Geology paper figure 1 --------------------------------------------------------------------------
@@ -302,84 +249,53 @@ HOBSmap <- ggplot(data = FL, aes(lon, lat, group = group)) +
                   geom_sf(data = fwcoy_m, aes(fill = "firebrick"), color = "firebrick", lwd = 0.5, inherit.aes = FALSE) +
                   geom_text_repel(data = HOBSdat_loc, aes(Lon, Lat, label = Locality), size = 7*0.35, nudge_x = HOBSdat_loc$x_nudge, nudge_y = HOBSdat_loc$y_nudge, segment.size = 0.25, min.segment.length = 0.4, inherit.aes = FALSE) +
                   geom_point(data = HOBSdat_loc, aes(Lon, Lat), color = "black", fill = "yellow1", shape = 21, size = 1.5, stroke = 0.5, inherit.aes = FALSE) +
-                  coord_sf(xlim = c(-87.5, -79), ylim = c(24.4, 31)) +
+                  # coord_sf(xlim = c(-87.5, -79), ylim = c(24.5, 31)) +
+                  xlim(-87.5, -79) +
+                  ylim(24.5, 31) +
                   theme_bw() +
                   theme(panel.grid.major = element_blank(),
                         panel.grid.minor = element_blank(),
                         panel.background = element_rect(fill = "lightblue1"), 
                         legend.title = element_blank(),
-                        legend.position = c(0.17, 0.45), #c(0.26, 0.1) c(0.18, 0.075)
+                        legend.position = c(0.26, 0.1),
                         legend.background = element_rect(fill = "transparent"),
                         legend.key = element_rect(colour = NA, fill = NA),
                         legend.key.size = unit(1,"line"),
                         text = element_text(size = 7),
                         plot.margin = unit(c(0, 0, 0, 0), "mm")) +
-                        # plot.margin = unit(c(0.05, 0.05, 0.05, 0.05), "mm")) +
                   labs(x = "Lat.", y = "Lon.") +
                   scale_fill_manual(name = NULL,
-                                    labels = c("FDEP ORCP\nmanaged areas", "Mapped oyster\nreefs (not to scale)"),
+                                    labels = c("FDEP ORCP managed areas", "Mapped oyster reefs (not to scale)"),
                                     values = c("dodgerblue", "firebrick"),
                                     guide = guide_legend(override.aes = list(color = "grey10", lwd = 0.25)))
-
-HOBSmap <- HOBSmap +
-  ggspatial::annotation_scale(
-    location = "br",
-    text_cex = .pt/5.5,
-    # pad_x = unit(0.06, "in"), pad_y = unit(0.5, "in"),
-    # pad_x = unit(2.2, "in"), pad_y = unit(0.05, "in"),
-    pad_x = unit(0.05, "in"), pad_y = unit(0.05, "in"),
-    line_width = 0.5,
-    height = unit(0.05, "in"),
-    bar_cols = c("grey60", "white")) +
-  ggspatial::annotation_north_arrow(
-    location = "br", which_north = "true",
-    # pad_x = unit(0.08, "in"), pad_y = unit(0.6, "in"),
-    pad_x = unit(0.1, "in"), pad_y = unit(0.15, "in"),
-    height = unit(0.3, "in"), width = unit(0.3, "in"),
-    style = ggspatial::north_arrow_fancy_orienteering(
-      fill = c("grey40", "white"),
-      # fill = "white",
-      line_col = "grey20"))
 
 refbox <- data.table(lat = c(rep(HOBSmap$coordinates$limits$x[1], 2), rep(HOBSmap$coordinates$limits$x[2], 2)), lon = c(HOBSmap$coordinates$limits$y, HOBSmap$coordinates$limits$y[2], HOBSmap$coordinates$limits$y[1]))
 refbox2 <- st_as_sf(refbox, coords = c("lat", "lon"), crs = st_crs(4326))
 refbox3 <- st_combine(refbox2)
 refbox4 <- st_cast(refbox3, "POLYGON")
 
-outbox <- data.table(lat = c(-165, -165, -20, -20), lon = c(-2.5, 82.5, 82.5, -2.5))
-outbox2 <- st_as_sf(outbox, coords = c("lat", "lon"), crs = st_crs(4326))
-outbox3 <- st_combine(outbox2)
-outbox4 <- st_cast(outbox3, "POLYGON")
-
 inset <- ggplot() +
-  geom_sf(data = subset(world_map_data, world_map_data$continent %in% c("North America", "South America")), lwd = 0.25, fill = "grey75", color = "grey75") +
-  geom_sf(data = refbox4, lwd = 0.4, color = "black", fill = "transparent") +
-  geom_sf(data = outbox4, lwd = 0.3, color = "black", fill = "transparent") +
-  coord_sf(xlim = c(-159, -26.5), ylim = c(1, 78.5)) +
-  # xlim(-170, -15) +
+  geom_sf(data = subset(world_map_data, world_map_data$continent %in% c("North America")), lwd = 0.25, fill = "grey75", color = "grey75") +
+  geom_sf(data = refbox4, lwd = 1, color = "black", fill = "transparent") +
+  # coord_sf(xlim = c(-175, -15), ylim = c(-55, 85)) +
+  xlim(-170, -15) +
   # ylim(-55, 85) + # w/ South America
-  # ylim(10, 85) + # w/o South America
+  ylim(10, 85) + # w/o South America
   theme_void() +
   theme(plot.margin = unit(c(0, 0, 0, 0), "mm"),
-        panel.background = element_rect(color = "transparent", size = 0.5, fill = "white"),
-        plot.background = element_blank())
-
-# layout = c(
-#   area(t = 1, l = 1, b = 50, r = 60),
-#   area(t = 32, l = 3, b = 50, r = 24)
-# )
+        plot.background = element_rect(color = "black", size = 1))
 
 layout = c(
-  area(t = 1, l = 1, b = 100, r = 120),
-  area(t = 65, l = 5, b = 100, r = 47)
+  area(t = 1, l = 1, b = 50, r = 60),
+  area(t = 30, l = 2, b = 48, r = 21)
 )
 
-HOBSmap2 <- HOBSmap + inset + plot_layout(design = layout)
+HOBSmap + inset + plot_layout(design = layout)
 
-ggsave(here::here("HOBSmap2_pica.pdf"),
-       HOBSmap2,
-       width = 21.5*(1/6), # 1 pica = ~1/6 inch; 3.5, #column width for 2-column page layout GSA Pub spec
-       height = 3,
+ggsave(here::here("HOBSmap.pdf"),
+       HOBSmap,
+       width = 3.5, #column width for 2-column page layout GSA Pub spec
+       height = 3.25,
        units = "in",
        device = grDevices::cairo_pdf)
 
@@ -458,6 +374,8 @@ dev.off()
 
 
 #Geology paper figure DR1
+setDT(LPvHP_dat2)
+LPvHP_dat2[, Loc := factor(Loc, levels = c("LSG", "LB", "HC-MC", "NP", "PC", "GR"))]
 LPvHPplot <- ggplot() +
   scale_color_brewer(palette = "Accent", aesthetics = "fill") +
   geom_point(data = LPvHP_dat2, aes(F14C_HP, F14C_LP, fill = Loc), shape = 21, color = "black", size = 2.5) +
@@ -512,7 +430,7 @@ Overall, the low-precision radiocarbon results indicated that oyster reef death 
 
 HOBSdat <- subset(HOBSdat, !is.na(HOBSdat$Sample_n))
 
-# posteriors <- fread(here::here("HOBS_Posteriors_all.csv"))
+posteriors <- fread(here::here("HOBS_Posteriors_all.csv"))
 posteriors[, loc := str_extract(name, "(^..)(?=_)|(^...)(?=_)|(^..-..)(?=_)")]
 posteriors[, sample := str_extract(name, "R.H.S.")]
 posteriors[, sample := paste0(loc, "_", sample)]
@@ -530,9 +448,9 @@ posteriors2$aProb <- posteriors2$probability.x/posteriors2$probability.y
 # 
 # HOBSdat <- merge()
 
-Sampdat <- HOBSdat[, .(Locality, Loc_ID, Reef_ID, Sample_ID, PRI_station, Lat, Lon, IGSN, Collection_date, Collection_time, Transect_Dist_m, Sample, Sample_n, Sample_mean_age, Sample_median_age, Sample_age_range, Sample_minimum_age, Sample_maximum_age, Sample_median_specimen_age_variability_IQR, Sample_total_age_variability_IQR, Sample_median_specimen_age_estimation_error, Sample_corrected_posterior_age_estimate, depth, reef, RandL)]
+Sampdat <- HOBSdat[, .(Locality, Loc_ID, Reef_ID, Sample_ID, PRI_station, Lat, Lon, IGSN, Collection_date, Collection_time, Transect_Dist_m, Sample, Sample_n, Sample_mean_age, Sample_median_age, Sample_age_range, Sample_minimum_age, Sample_maximum_age, Sample_age_stdev, `Sample_median_specimen_age_variability_(IQR)`, `Sample_total_age_variability_(IQR)`, `Sample_median_specimen_age-estimation_error`, Sample_corrected_posterior_age_estimate, depth, reef, RandL)]
 Sampdat <- distinct(Sampdat)
-Sampdat <- subset(Sampdat, !is.na(Sampdat$Sample_n) & Sampdat$Sample_n != 0)
+Sampdat <- subset(Sampdat, !is.na(Sampdat$Sample_n))
 
 #Proportion of samples with pre/post-bomb median calibrated ages
 prebomb <- nrow(Sampdat[Sample_median_age <= 1950])/nrow(Sampdat)
@@ -567,9 +485,9 @@ Stratprop_pos <- nrow(leveldiffs[Median_diff >= 0, ])/nrow(leveldiffs)
 Stratprop_neg <- nrow(leveldiffs[Median_diff < 0, ])/nrow(leveldiffs)
 
 #Generate a table of sample-level results
-Sampdat2 <- Sampdat[, .(Locality, PRI_station, IGSN, depth, Sample_n, Sample_median_age, Sample_minimum_age, Sample_maximum_age, Sample_median_specimen_age_estimation_error, Sample_total_age_variability_IQR, Sample_corrected_posterior_age_estimate)]
-Sampdat2[ , `:=` (Sample_median_age = round(Sample_median_age, 0), Sample_minimum_age = round(Sample_minimum_age, 0), Sample_maximum_age = round(Sample_maximum_age, 0), Sample_median_specimen_age_estimation_error = round(Sample_median_specimen_age_estimation_error, 2), Sample_total_age_variability_IQR = round(Sample_total_age_variability_IQR, 2), Sample_corrected_posterior_age_estimate = round(Sample_corrected_posterior_age_estimate, 2))]
-setnames(Sampdat2, c("Locality", "PRI_station", "IGSN", "depth", "Sample_n", "Sample_median_age", "Sample_minimum_age", "Sample_maximum_age", "Sample_median_specimen_age_estimation_error", "Sample_total_age_variability_IQR", "Sample_corrected_posterior_age_estimate"), c("Locality", "Station", "IGSN", "Depth", "N", "Median", "Min.", "Max.", "IQR\\textsubscript{AER}", "IQR\\textsubscript{TAV}", "IQR\\textsubscript{CPE}"))
+Sampdat2 <- Sampdat[, .(Locality, PRI_station, IGSN, depth, Sample_n, Sample_median_age, Sample_minimum_age, Sample_maximum_age, `Sample_median_specimen_age-estimation_error`, `Sample_total_age_variability_(IQR)`, Sample_corrected_posterior_age_estimate)]
+Sampdat2[ , `:=` (Sample_median_age = round(Sample_median_age, 0), Sample_minimum_age = round(Sample_minimum_age, 0), Sample_maximum_age = round(Sample_maximum_age, 0), `Sample_median_specimen_age-estimation_error` = round(`Sample_median_specimen_age-estimation_error`, 2), `Sample_total_age_variability_(IQR)` = round(`Sample_total_age_variability_(IQR)`, 2), Sample_corrected_posterior_age_estimate = round(Sample_corrected_posterior_age_estimate, 2))]
+setnames(Sampdat2, c("Locality", "PRI_station", "IGSN", "depth", "Sample_n", "Sample_median_age", "Sample_minimum_age", "Sample_maximum_age", "Sample_median_specimen_age-estimation_error", "Sample_total_age_variability_(IQR)", "Sample_corrected_posterior_age_estimate"), c("Locality", "Station", "IGSN", "Depth", "N", "Median", "Min.", "Max.", "IQR\\textsubscript{AER}", "IQR\\textsubscript{TAV}", "IQR\\textsubscript{CPE}"))
 Sampdat2[Locality == "Jack Island/Wildcat Cove", Locality := "Jack Island"]
 
 #Sampdat_table <- kbl(Sampdat[, .(Locality, PRI_station, IGSN, depth, Sample_n, Sample_median_age, Sample_minimum_age, Sample_maximum_age, `Sample_median_specimen_age-estimation_error`, `Sample_total_age_variability_(IQR)`, Sample_corrected_posterior_age_estimate)], 
@@ -1486,58 +1404,31 @@ dev.off()
 }
 
 
-vlines2 <- data.frame(xint = c(median(subset(sampsum, sampsum$depth == "15-25")$median_age_bp), 
-                              median(subset(sampsum, sampsum$depth == "25-35")$median_age_bp)), 
-                     depth = c('15-25cm', '25-35cm'))
-
 #Time-averaging by median sample age (True sample version)
+
+vlines2 <- data.frame(depth = c('15-25cm', '25-35cm'), 
+                      xint_mean = c(mean(subset(sampsum, sampsum$depth == "15-25")$median_age_bp), 
+                                    mean(subset(sampsum, sampsum$depth == "25-35")$median_age_bp)),
+                      xint_med = c(median(subset(sampsum, sampsum$depth == "15-25")$median_age_bp), 
+                                   median(subset(sampsum, sampsum$depth == "25-35")$median_age_bp)))
 
 Ketal <- data.frame(median_age_bp = 1058, Sample_corrected_posterior_age_estimate = 1830)
 label1 <- c(expression(atop(NA, atop(textstyle('Kowalewski et al. 2018'), 
                                      textstyle(paste('(', italic('Tucetona pectinata'), ')'))))))
-
-#Changed my mind - I think all ages in this figure should be relative to the sample collection date
-# #Correct Ketal ages for difference in "BP" - paper is relative to 2016, but our study is relative to 2019
-# setDT(Ketal)
-# Ketal[, median_age_bp := median_age_bp + 3]
-
 
 Detal <- data.frame(median_age_bp = c(123, 283, 146, 148, 160, 2043), 
                     Sample_corrected_posterior_age_estimate = c(68, 2670, 16, 27, 16, 1937))
 label2 <- c(expression(atop(NA, atop(textstyle('Dominguez et al. 2016'), 
                                      textstyle(paste('(', italic('Fulvia tenuicostata'), ')'))))))
 
-#Changed my mind - I think all ages in this figure should be relative to the sample collection date
-# #Correct Detal ages for difference in "BP" - paper is relative to 2013, but our study is relative to 2019
-# setDT(Detal)
-# Detal[, median_age_bp := median_age_bp + 6]
-
-Retal <- data.frame(Site = c(1, 2, 3),
-                    median_age_bp = c(2658, 1318, 230),
-                    Sample_corrected_posterior_age_estimate = c(1251, 490, 14))
+Retal <- data.frame(median_age_bp = c(2658, 1318, 230),
+                       Sample_corrected_posterior_age_estimate = c(1251, 490, 14))
 label3 <- c(expression(atop(NA, atop(textstyle('Ritter et al. 2017'), 
                                      textstyle(paste('(', italic('Mactra sp.'), ')'))))))
 
-#Correct Retal ages for difference in "BP" - paper is relative to 1950, with Site 1 collected in 2013 and Sites 2 and 3 collected in 1974, but our study is relative to 2019. Correct dates relative to collection date.
-setDT(Retal)
-Retal[, median_age_bp := ifelse(Site == 1, median_age_bp + 63, median_age_bp + 24)]
-
-
-Tetal1 <- readRDS(here::here("Tomasovych2018_medageandta.rds"))
+Tetal <- readRDS(here::here("Tomasovych2018_medageandta.rds"))
 label4 <- c(expression(atop(NA, atop(textstyle('Toma\u161ov\uFDch et al. 2018'),
                                      textstyle(paste0('(', italic('Corbula gibba'), ')'))))))
-
-#Changed my mind - I think all ages in this figure should be relative to the sample collection date
-# #Correct Tetal ages for difference in "BP" - paper is relative to 2013, but our study is relative to 2019
-# setDT(Tetal)
-# Tetal[, medage := medage + 6]
-
-#USING Tomasovych et al. (2019) data isn't straightforward; they report the specimen ages in their supplementary materials, but not the age estimate IQRs or the core interval-level IQRs, so I did not incorporate them into this figure.
-Tetal2 <- openxlsx::read.xlsx(here::here("TomasovychA-etal_2019/Supplementary Table 01.xlsx"), sheet = "AAR-Parvilucina-replicates_aver")
-setDT(Tetal2)
-Tetal2[, `:=` (trueupperdepth = as.numeric(`True.upper.depth.(cm)`), truelowerdepth = as.numeric(`True.lower.depth.(cm)`), agebpcoll = `Calibrated.shell.age.(years.before.AAR.dating)` - (`Year.of.amino.acid.dating.(BC/AD)` - `Year.of.shell.collection.(BC/AD)`))]
-label5 <- c(expression(atop(NA, atop(textstyle('Toma\u161ov\uFDch et al. 2019'),
-                                     textstyle(paste0('(', italic('Parvilucina tenuisculpta \\& Nuculana taphria'), ')'))))))
 
 png(file = here::here(paste0("HOBS_geochronology_ms2/Figures/HOBS_geochron_Fig18_", Sys.Date(), ".png")), width = 2500, height = 2000, res = 275)
 ggplot(sampsum, aes(x = median_age_bp, y = Sample_corrected_posterior_age_estimate)) +
@@ -1569,55 +1460,53 @@ ggplot(sampsum, aes(x = median_age_bp, y = Sample_corrected_posterior_age_estima
 dev.off()
 
 #Geology paper figure 4-------------------------------------------------------------------------------
-nonhobsfill <- "antiquewhite"
-nonhobscol <- "black"
+log10_rev_trans <- scales::trans_new(
+  "log10_rev",
+  transform = function(x) -1 * (log10(x)),
+  inverse = function(x) 10 ^ abs(x),
+  scales::log_breaks(5),
+  domain = c(1e-100, Inf)
+)
 
 TAscalecompare <- ggplot(sampsum, aes(x = median_age_bp, y = Sample_corrected_posterior_age_estimate)) +
   theme_classic(base_size = 7, base_family = "Arial") +
   scale_fill_discrete_qualitative(palette = "Harmonic") +
   scale_color_discrete_qualitative(palette = "Harmonic") +
-  geom_vline(xintercept = c(seq(100, 900, 100), 1500, 2500), lwd = 0.25, color = "grey80") +
-  # geom_vline(xintercept = c(seq(1, 9, 1), seq(10, 90, 10), seq(100, 900, 100), seq(1000, 5000, 1000)), lwd = 0.25, color = "grey70") +
-  # geom_vline(xintercept = c(1, 10, 100, 1000), lwd = 0.25, color = "grey40") +
-  geom_vline(xintercept = c(0, 500, 1000, 2000, 3000), lwd = 0.25, color = "grey40") +
   geom_hline(yintercept = c(1, 10, 100, 1000), lwd = 0.25) +
-  geom_vline(data = vlines2, aes(xintercept = xint, color = depth), lwd = 0.75, show.legend = FALSE) +
-  geom_point(aes(fill = depth, shape = "This study"), color = "black", size = 1.5) +
-  geom_point(data = Ketal, aes(shape = "Kowalewski et al. (2018)"), fill = nonhobsfill, color = nonhobscol, size = 1.5) +
+  geom_vline(data = vlines2, aes(xintercept = xint_mean, color = depth), lwd = 0.5, show.legend = FALSE) +
+  geom_hline(data = vlines2, aes(yintercept = xint_mean, color = depth), lwd = 0.5, show.legend = FALSE) +
+  geom_point(aes(fill = depth, shape = "This study"), color = "black", size = 1.75, stroke = 1) +
+  geom_point(data = Ketal, aes(shape = "Kowalewski et al. (2018)"), fill = 'grey80', color = 'black', size = 1.75, stroke = 1) +
   #annotate('text', x = Ketal$median_age_bp[1] - 250, y = Ketal$Sample_corrected_posterior_age_estimate[1] + 1500, 
   #         label = label1) +
-  geom_point(data = Detal, aes(shape = "Dominguez et al. (2016)"), fill = nonhobsfill, color = nonhobscol, size = 1.5) +
+  geom_point(data = Detal, aes(shape = "Dominguez et al. (2016)"), fill = 'grey80', color = 'black', size = 1.75, stroke = 1) +
   #annotate('text', x = Detal$median_age_bp[6] - 250, y = Detal$Sample_corrected_posterior_age_estimate[6] + 1700, 
   #         label = label2) +
-  geom_point(data = Retal, aes(shape = "Ritter et al. (2017)"), fill = nonhobsfill, color = nonhobscol, size = 1.5) +
-  geom_point(data = Tetal1[depth >= 10 & depth <= 35, ], aes(x = medage, y = corIQR, shape = "Toma\u{161}ov\u{FD}ch et al. (2018)"), fill = nonhobsfill, color = nonhobscol, size = 1.5) +
-  scale_y_continuous(breaks = c(1, 10, 100, 1000), trans='log10') +
-  # scale_x_continuous(breaks = c(1, 10, 100, 1000), trans = c("log10", "reverse")) +
-  scale_x_reverse(breaks = c(3000, 2000, 1000, 500, 0)) +
-  coord_cartesian(xlim = c(3000, 1)) +
-  labs(x = 'Median age (years relative to collection year)',
-       y = 'Time-averaging estimate (yr)',
+  geom_point(data = Retal, aes(shape = "Ritter et al. (2017)"), fill = 'grey80', color = 'black', size = 1.75, stroke = 1) +
+  geom_point(data = Tetal[depth >= 10 & depth <= 35, ], aes(x = medage, y = corIQR, shape = "Toma\u{161}ov\u{FD}ch et al. (2018)"), fill = 'grey80', color = 'black', size = 1.75, stroke = 1) +
+  scale_y_continuous(trans = scales::log10_trans()) +
+  scale_x_continuous(trans = log10_rev_trans) +
+  labs(x = 'Median age (bp)',
+       y = 'Time averaging estimate (yr)',
        fill = 'Burial depth (cm)',
        shape = "") + 
   scale_shape_manual(values = c("This study" = 21, "Kowalewski et al. (2018)" = 22, "Dominguez et al. (2016)" = 23, "Ritter et al. (2017)" = 24, "Toma\u{161}ov\u{FD}ch et al. (2018)" = 25),
                      breaks = c("This study", "Dominguez et al. (2016)", "Ritter et al. (2017)", "Kowalewski et al. (2018)", "Toma\u{161}ov\u{FD}ch et al. (2018)")) +
-  guides(fill=guide_legend(override.aes=list(shape=21))) +
+  guides(fill = guide_legend(override.aes = list(shape = 15, size = 5, color = hcl.colors(palette = "Harmonic", n = 2)))) +
   theme(axis.title = element_text(size = 7), 
         axis.text = element_text(size = 7, colour = "black"), 
         legend.text = element_text(size = 7), 
         legend.title = element_text(size = 7),
         legend.key.size = unit(1,"line"),
-        panel.grid.major.x = element_blank(), #element_line(size = 0.25, color = "grey60"),
-        panel.grid.minor.x = element_blank(), #element_line(size = 0.25, color = "grey80"),
-        panel.grid.major.y = element_blank(), #element_line(size = 0.25, color = "grey70"),
+        panel.grid.major.x = element_line(size = 0.25),
+        panel.grid.major.y = element_line(size = 0.25, color = "black"),
         #panel.grid.minor.y = element_line(size = 0.25),
         axis.line = element_line(size = 0.25))
-TAscalecompare
 
-ggsave(here::here("TAscalecompare2_pica.pdf"),
+ggsave(here::here("TAscalecompare.pdf"),
        TAscalecompare,
-       width = 44*(1/6), # 7.125, #full page width GSA Pub spec
-       height = 3, #3.5,
+       width = 7.125, #full page width GSA Pub spec
+       height = 3.5,
        #width = 3.5, #column width for 2-column page layout GSA Pub spec
        #height = 3,
        units = "in",
@@ -1773,100 +1662,50 @@ sampsum[, reef_lab := fcase(locality == "GI-EC" & reef == 4, 3L,
                             locality == "LC" & reef == 5, 4L,
                             locality == "MR" & reef == 2, 1L,
                             locality == "MR" & reef == 3, 2L)][is.na(reef_lab), reef_lab := reef]
-sampsum[, max_reef_lab := max(reef_lab), by = locality]
-sampsum[, loc_reef_lab := paste0(locality, reef_lab)]
-sampsum[, pointsize := as.integer(Sample_n) * 0.3]
-
-#Create a reverse log scale for the plot x-axis (https://stackoverflow.com/questions/63165462/how-to-reverse-axis-y-predetermined-from-scale-y-log10-ggplot-repeated)
-reverselog_trans <- function(base = exp(1)) {
-  trans <- function(x) -log(x, base)
-  inv <- function(x) base^(-x)
-  trans_new(paste0("reverselog-", format(base)), trans, inv, 
-            log_breaks(base = base), 
-            domain = c(0, Inf))
-}
-
-hgridline <- distinct(sampsum[, .(locality, max_reef_lab)])
-# hgridline[, yint := seq(1.5, .SD - 0.5), by = locality, SDcols = max_reef_lab]
-hgridline2 <- data.table(yint = hgridline[, seq(1.5, max_reef_lab - 0.5), by = locality])
-setnames(hgridline2, c("yint.locality", "yint.V1"), c("locality", "yint"))
-
-tilemidpt <- log10((max(ifelse(sampsum$median_age_bp - (sampsum$Sample_corrected_posterior_age_estimate/2) < 0, sampsum$Sample_corrected_posterior_age_estimate, sampsum$median_age_bp + (sampsum$Sample_corrected_posterior_age_estimate/2))) - min(ifelse(sampsum$median_age_bp - (sampsum$Sample_corrected_posterior_age_estimate/2) < 0, 0, sampsum$median_age_bp - (sampsum$Sample_corrected_posterior_age_estimate/2))))/2)
-
-tilewidth <- log10(max(ifelse(sampsum$median_age_bp - (sampsum$Sample_corrected_posterior_age_estimate/2) < 0, sampsum$Sample_corrected_posterior_age_estimate, sampsum$median_age_bp + (sampsum$Sample_corrected_posterior_age_estimate/2))) - min(ifelse(sampsum$median_age_bp - (sampsum$Sample_corrected_posterior_age_estimate/2) < 0, 0, sampsum$median_age_bp - (sampsum$Sample_corrected_posterior_age_estimate/2))))
-
-tiley <- sampsum[loc_reef_lab %in% c("BH1", "BH3", "GI-EC2", "GR1", "GR3", "HC-MC2", "JI2", "LC2", "LC4", "LSG2", "MR1", "NP1", "NP3", "PC2"), .(locality, reef_lab, loc_reef_lab, max_reef_lab)]
-tiley[, linewidth := 29/max_reef_lab, by = locality]
-tiley <- distinct(tiley[, `:=` (reef_lab = as.numeric(reef_lab), loc_reef_lab = NULL, max_reef_lab = NULL)])
-# tiley[, Sample_n := linewidth / 8.055556] #needs to be called "Sample_n" to match the size scale in the plot code
-tiley[, lwind := fcase(round(linewidth, 5) == 7.25000, "3",
-                       round(linewidth, 6) == 9.666667, "2",
-                       round(linewidth, 5) == 14.50000, "1"), by = row.names(tiley)]
-# tiley[, lwind := factor(lwind, levels = c(1, 2, 3))]
-
-#Dummy data to try to fix the spacing of y-axis
-ydum <- data.table(locality = rep(unique(sampsum$locality), each = 11),
-                   ypt = rep(seq(0.5, 5.5, 0.5), 10))
-ydum2 <- ydum[0]
-for(loc in unique(sampsum$locality)){
-  ydum_i <- ydum[locality == loc & ypt <= unique(sampsum[locality == loc, max_reef_lab]) + 0.5]
-  ydum2 <- rbind(ydum2, ydum_i)
-}
-
-# Links I found useful for creating two separate size scales:
-# 1. ggnewscale() function: https://stackoverflow.com/questions/17642190/how-to-set-multiple-legends-scales-for-the-same-aesthetic-in-ggplot2/17642257#17642257
-# 2. re-purposing a different, unused scale: https://stackoverflow.com/questions/34893760/how-to-scale-the-size-of-line-and-point-separately-in-ggplot2
-
-sampsum[, locality := factor(locality, levels = c("LSG", "GI-EC", "LC", "HC-MC", "NP", "BH", "JI", "PC", "MR", "GR"), ordered = TRUE)]
-sampsum[, locality := as.character(locality)]
+sampsum[, locality := factor(locality, levels = c("LSG", "GI-EC", "LC", "LB", "HC-MC", "NP", "BH", "JI", "PC", "MR", "GR"))]
 
 medagebysample <- ggplot(sampsum, aes(x = median_age_bp, y = as.character(reef_lab), shape = holeN3, fill = depth)) +
   theme_bw(base_size = 7, base_family = "Arial") +
-  geom_point(data = ydum2, aes(x = NA, y = ypt), alpha = 1, inherit.aes = FALSE) +
-  geom_hline(data = tiley, aes(yintercept = reef_lab, size = lwind), color = "grey95") +
-  geom_vline(xintercept = c(1, 10, 100, 1000), lwd = 0.25, color = "grey70") +
-  geom_hline(data = hgridline2, aes(yintercept = yint), lwd = 0.25, color = "black") +
-  scale_size_manual(values = c(14.50000, 9.666667, 7.25000), breaks = c(1:3),
-                    guide = "none") +
-  ggnewscale::new_scale("size") +
-  geom_errorbar(aes(xmin = ifelse(median_age_bp - (Sample_corrected_posterior_age_estimate/2) < 0, 0, median_age_bp - (Sample_corrected_posterior_age_estimate/2)), 
+  #scale_color_manual(values = reefcols, aesthetics = c("color", "fill")) +
+  # geom_errorbar(aes(xmin = ifelse(median_age_bp - (Sample_corrected_posterior_age_estimate/2) < 0, 0, median_age_bp - (Sample_corrected_posterior_age_estimate/2)), 
+  #                   xmax = ifelse(median_age_bp - (Sample_corrected_posterior_age_estimate/2) < 0, Sample_corrected_posterior_age_estimate, median_age_bp + (Sample_corrected_posterior_age_estimate/2)), color = depth),
+  #               position = position_dodge(width = 0.5), width = 0.3, key_glyph = "rect", lwd = 0.25) +
+  # geom_point(aes(size = Sample_n), position = position_dodge(width = 0.5), color = "black", key_glyph = "rect") +
+    geom_errorbar(aes(xmin = ifelse(median_age_bp - (Sample_corrected_posterior_age_estimate/2) < 0, 0, median_age_bp - (Sample_corrected_posterior_age_estimate/2)), 
                     xmax = ifelse(median_age_bp - (Sample_corrected_posterior_age_estimate/2) < 0, Sample_corrected_posterior_age_estimate, median_age_bp + (Sample_corrected_posterior_age_estimate/2)), color = depth, group = sample),
-                position = position_dodge(0.5), width = 0.35, key_glyph = draw_key_rect, lwd = 0.3) +
-  geom_point(aes(size = Sample_n, group = sample), position = position_dodge(0.5), color = "black") +
-  geom_point(aes(y = NA, x = ylim_low, group = sample), alpha = 0) +
-  geom_point(aes(y = NA, x = ylim_high, group = sample), alpha = 0) +
-  scale_x_continuous(breaks = c(0, 1, 10, 100, 1000, 10000), trans = reverselog_trans(10)) +
-  scale_y_discrete(limits = rev, breaks = c(0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5), labels = c("", "1", "", "2", "", "3", "", "4", "", "4", ""), expand = c(0,0)) +
+                position = position_dodge(0.5), width = 0.3, key_glyph = "rect", lwd = 0.25) +
+  geom_point(aes(size = Sample_n, group = sample), position = position_dodge(0.5), color = "black", key_glyph = "rect") +
+  geom_point(aes(y = NA, x = ylim_low, size = Sample_n, group = sample), color = "black") +
+  geom_point(aes(y = NA, x = ylim_high, size = Sample_n, group = sample), color = "black") +
+  scale_x_log10() +
+  scale_y_discrete(limits = rev, breaks = c(1, 2, 3, 4, 5), labels = c(1, 2, 3, 4, 4)) +
   scale_shape_manual(values = c("Hole 1" = 21, "Hole 2" = 22, "Hole 3" = 24)) +
-  scale_size_manual(values = c(0.6, 0.9, 1.2, 1.5, 1.8, 2.1), breaks = c(2:7),
-                    guide = guide_legend(override.aes = list(shape = 21,
-                                                             color = "black"))) +
-  scale_fill_discrete_qualitative(palette = "Harmonic", guide = "none") +
+  scale_size_manual(values = c(0.6, 0.8, 1, 1.2, 1.4, 1.6), breaks = c(2:7)) +
+  scale_fill_discrete_qualitative(palette = "Harmonic") +
   scale_color_discrete_qualitative(palette = "Harmonic") +
-  labs(y = "Reef",
-       x = "Median age (years relative to 2019)",
-       shape = "Sample hole",
+  labs(y = "Reef", #'Burial depth (cm)',
+       x = 'Median age (bp)', #) +
+       shape = 'Sample hole',
        color = "Burial depth (cm)",
+       fill = "Burial depth (cm)", 
        size = "Sample size") +
-  theme(panel.grid.major.x = element_line(linetype = "blank"), 
+  theme(panel.grid.major.x = element_line(color = "black"), 
         panel.grid.minor.x = element_line(linetype = "blank"), 
-        panel.grid.major.y = element_line(linetype = "blank"), 
-        panel.grid.minor.y = element_line(linetype = "blank"),
-        axis.text = element_text(size = 7, color = "black"),
+        panel.grid.major.y = element_line(color = "grey80"), 
+        panel.grid.minor.y = element_line(color = "grey80"),
+        axis.text = element_text(size = 7),
         axis.line = element_line(),
         legend.text = element_text(size = 7),
         legend.key.size = unit(1,"line"),
         panel.background = element_rect(fill = NA)) +
-  # facet_grid(rows = vars(locality), scales = "free_y", switch = "y")
-  facet_grid(rows = vars(factor(locality, levels = c("LSG", "GI-EC", "LC", "HC-MC", "NP", "BH", "JI", "PC", "MR", "GR"))), scales = "free_y", switch = "y")
-medagebysample
+  facet_grid(rows = vars(locality), scales = "free_y", switch = "y")
 
-ggsave(here::here("medagebysample2_pica.pdf"),
+ggsave(here::here("medagebysample.pdf"),
        medagebysample,
        #width = 7.125, #full page width GSA Pub spec
        #height = 5,
-       width = 29 * (1/6), #3.5, #column width for 2-column page layout GSA Pub spec
-       height = 53 * (1/6), #9.5, #full page depth GSA Pub spec
+       width = 3.5, #column width for 2-column page layout GSA Pub spec
+       height = 9.5, #full page depth GSA Pub spec
        units = "in",
        device = grDevices::cairo_pdf)
 
@@ -1889,7 +1728,7 @@ medagebysample_wide <- ggplot(sampsum, aes(x = median_age_bp, y = as.character(r
   scale_fill_discrete_qualitative(palette = "Harmonic") +
   scale_color_discrete_qualitative(palette = "Harmonic") +
   labs(y = "Reef", #'Burial depth (cm)',
-       x = 'Median age (cal. bp)', #) +
+       x = 'Median age (bp)', #) +
        shape = 'Sample hole',
        color = "Burial depth (mm)",
        fill = "Burial depth (mm)", 
@@ -1904,53 +1743,6 @@ medagebysample_wide <- ggplot(sampsum, aes(x = median_age_bp, y = as.character(r
         legend.key.size = unit(1,"line"),
         panel.background = element_rect(fill = NA)) +
   facet_wrap(~ locality, nrow = 4, scales = "free_y", strip.position = "top")
-
-
-#Summary of min/max age and cpe differences by depth and hole
-sampsum_sub <- sampsum[, .(locality, reef2, holeN, depth, sample, median_age_bp, Sample_median_age, Sample_corrected_posterior_age_estimate)]
-sampsum_sub[, depth2 := ifelse(str_detect(depth, "15"), "S1", "S2")]
-
-#By hole
-sampsum_sub2 <- pivot_wider(sampsum_sub, id_cols = c("locality", "reef2", "holeN"), names_from = "depth", values_from = c("median_age_bp", "Sample_median_age", "Sample_corrected_posterior_age_estimate"))
-setDT(sampsum_sub2)
-sampsum_sub2[, `:=` (bp_diff = median_age_bp_S2 - median_age_bp_S1, medage_diff = Sample_median_age_S2 - Sample_median_age_S1, cpe_diff = Sample_corrected_posterior_age_estimate_S2 - Sample_corrected_posterior_age_estimate_S1)]
-setorder(sampsum_sub2, locality, reef2, -bp_diff)
-hole_ranges <- sampsum_sub2[!is.na(bp_diff), .(range(bp_diff)[1], range(bp_diff)[2], range(cpe_diff)[1], range(cpe_diff)[2]), by = c("locality", "reef2")]
-setnames(hole_ranges, c("V1", "V2", "V3", "V4"), c("bp_min_diff", "bp_max_diff", "cpe_min_diff", "cpe_max_diff"))
-
-
-#By depth
-sampsum_sub[, `:=` (bp_dep_cv = sd(median_age_bp)/mean(median_age_bp), 
-                    bp_dep_diff = range(median_age_bp)[2] - range(median_age_bp)[1],
-                    cpe_dep_cv = sd(Sample_corrected_posterior_age_estimate)/mean(Sample_corrected_posterior_age_estimate),
-                    cpe_dep_diff = range(Sample_corrected_posterior_age_estimate)[2] - range(Sample_corrected_posterior_age_estimate)[1]),
-            by = c("locality", "reef2", "depth2")]
-
-depth_ranges <- distinct(sampsum_sub[!is.na(bp_dep_cv), .(locality, reef2, depth2, bp_dep_cv, bp_dep_diff, cpe_dep_cv, cpe_dep_diff)])
-setorder(depth_ranges, depth2, locality, reef2)
-
-#within-hole range in median_age_bp
-sampsum_sub2[!is.na(bp_diff), .(mean(bp_diff), sd(bp_diff), median(bp_diff))]
-
-#within-hole range in Sample_corrected_posterior_age_estimate
-sampsum_sub2[!is.na(cpe_diff), .(mean(cpe_diff), sd(cpe_diff), median(cpe_diff))]
-
-#within-depth and reef range in median_age_bp
-depth_ranges[!is.na(bp_dep_diff), .(mean(bp_dep_diff), sd(bp_dep_diff), median(bp_dep_diff))]
-
-#within-depth and reef range in Sample_corrected_posterior_age_estimate
-depth_ranges[!is.na(cpe_dep_diff), .(mean(cpe_dep_diff), sd(cpe_dep_diff), median(cpe_dep_diff))]
-
-
-
-#Checking for a difference between NP R1 and other NP reefs, given difference in burial depths sampled (i.e., R1 = 15-30cm and 30-45cm but others were 15-25cm and 25-35cm)
-
-NP <- sampsum[locality == "NP", .(locality, reef2, holeID, depth, median_age_bp, Sample_corrected_posterior_age_estimate)]
-#NP[reef2 == "Reef 1", depth := ifelse(str_detect(depth, "15"), "15-30", "30-45")]
-NP_bdtest <- brm(median_age_bp ~ (1 + reef2 | depth), family = "gaussian", data = NP, cores = 4, control = list(adapt_delta = 0.8, max_treedepth = 10), iter = 5000, warmup = 1000, chains = 4, thin = 3, backend = "cmdstanr")
-
-NP_bdtest2 <- brm(median_age_bp ~ reef2 + depth + reef2:depth, family = "gaussian", data = NP, cores = 4, control = list(adapt_delta = 0.8, max_treedepth = 10), iter = 5000, warmup = 1000, chains = 4, thin = 3, backend = "cmdstanr")
-
 
 ```
 
@@ -2096,117 +1888,6 @@ kbl(pricats2, booktabs = T, format = "latex", longtable = T, caption = "Informat
 # 
 # The results of such studies highlight the long-recognized need to understand patterns of time-averaging to determine the types of studies that are possible with particular fossil or sub-fossil assemblages (ref, ref). For instance, many paleoecological questions involving behavioral change over time on a local scale or interpretations of biogeographic patterns in response to relatively rapid environmental change require lower time-averaging than studies of general biodiversity trends through time. One might expect that reef assemblages are less susceptible to forces of mixing than others and thus that they would be some of the highest-resolution fossil assemblages, and therefore among the best choices for documenting biological and ecological processes operating on ecological timescales in the past. Oyster reefs, for instance, are a prominent benthic habitat type around the world with many species, especially the genus _Crassostrea_, producing large, dense aggregations that can be >1m in height, depending on tidal conditions. _Crassostrea_ reefs are formed by settlement of larval oysters upon the existing oyster shells on the surface of the reef, which then cement themselves in place and grow into adults, a process that produces clumps of oyster shells attached to one another that often become interlocked like puzzle pieces. The resulting structure is likely to limit the effects of bioturbation and other mixing forces on the shells and sediments within an oyster reef, as has been demonstrated for seagrass beds, which also stabilize sediments and reduce bioturbation [@arkleEvidenceStratigraphyMolluscan2018]. To test this assumption, here we report results of radiocarbon analyses of oyster reef death assemblages from living, natural oyster reefs in Florida, USA. The results could have important implications for studies of oyster reef bioherms in the fossil record.
 ```
-
-```{r envTable, eval=FALSE, include=FALSE}
-
-tp <- fread("C:/Users/durham_s/Downloads/Total_Phosphorus_Lab_All_ManagedArea_Year_Stats.txt", sep = "|")
-tn <- fread("C:/Users/durham_s/Downloads/Total_Nitrogen_Lab_All_ManagedArea_Year_Stats.txt", sep = "|")
-cdom <- fread("C:/Users/durham_s/Downloads/Colored_dissolved_organic_matter_CDOM_Lab_All_ManagedArea_Year_Stats.txt", sep = "|")
-chla <- fread("C:/Users/durham_s/Downloads/Chlorophyll_a_uncorrected_for_pheophytin_All_All_ManagedArea_Year_Stats.txt", sep = "|")
-ph <- fread("C:/Users/durham_s/Downloads/pH_Field_All_ManagedArea_Year_Stats.txt", sep = "|")
-temp <- fread("C:/Users/durham_s/Downloads/Water_Temperature_Field_All_ManagedArea_Year_Stats.txt", sep = "|")
-turb <- fread("C:/Users/durham_s/Downloads/Turbidity_All_All_ManagedArea_Year_Stats.txt", sep = "|")
-tss <- fread("C:/Users/durham_s/Downloads/Total_Suspended_Solids_TSS_All_All_ManagedArea_Year_Stats.txt", sep = "|")
-sd <- fread("C:/Users/durham_s/Downloads/Secchi_Depth_Field_Surface_ManagedArea_Year_Stats.txt", sep = "|")
-sal <- fread("C:/Users/durham_s/Downloads/Salinity_All_All_ManagedArea_Year_Stats.txt", sep = "|")
-do <- fread("C:/Users/durham_s/Downloads/Dissolved_Oxygen_Field_All_ManagedArea_Year_Stats.txt", sep = "|")
-
-hobsmas <- c("Apalachicola Bay Aquatic Preserve", 
-             "Apalachicola National Estuarine Research Reserve", 
-             "Big Bend Seagrasses Aquatic Preserve", 
-             "Estero Bay Aquatic Preserve", 
-             "Indian River-Vero Beach to Ft. Pierce Aquatic Preserve", 
-             "Guana Tolomato Matanzas National Estuarine Research Reserve", 
-             "Guana River Marsh Aquatic Preserve")
-
-ts2dat <- dplyr::bind_rows(tp[ManagedAreaName %in% hobsmas, ], 
-                            tn[ManagedAreaName %in% hobsmas, ],
-                            cdom[ManagedAreaName %in% hobsmas, ],
-                            chla[ManagedAreaName %in% hobsmas, ],
-                            ph[ManagedAreaName %in% hobsmas, ],
-                            temp[ManagedAreaName %in% hobsmas, ],
-                            turb[ManagedAreaName %in% hobsmas, ],
-                            tss[ManagedAreaName %in% hobsmas, ],
-                            sd[ManagedAreaName %in% hobsmas, ],
-                            sal[ManagedAreaName %in% hobsmas, ],
-                            do[ManagedAreaName %in% hobsmas, ])
-
-commonyears <- data.table(ManagedAreaName = character(),
-                          years_c = list())
-
-params <- c("Total Phosphorus", "Total Nitrogen", "Water Temperature", "Salinity", "Turbidity", "Dissolved Oxygen")
-
-for(m in unique(ts2dat$ManagedAreaName)){
-  years_m <- unique(ts2dat$Year)
-  
-  for(p in params){
-    years_m <- intersect(years_m, ts2dat[ManagedAreaName == m & ParameterName == p, unique(Year)])
-    
-  }
-  commonyears_m <- data.table(ManagedAreaName = m,
-                              years_c = list(years_m))
-  
-  commonyears <- rbind(commonyears, commonyears_m)
-  
-}
-
-ts2dat_c <- ts2dat[0]
-
-for(t in unique(ts2dat$ManagedAreaName)){
-  cyrs <- commonyears[ManagedAreaName == t, years_c[[1]]]
-  
-  ts2dat_t <- ts2dat[ManagedAreaName == t & ParameterName %in% params & Year %in% cyrs, ]
-  
-  ts2dat_c <- rbind(ts2dat_c, ts2dat_t)
-  
-}
-
-ts2dat_c[, `:=` (med_n = median(N, na.rm = TRUE), iqr_nl = quantile(N, probs = 0.25, na.rm = TRUE), iqr_nh = quantile(N, probs = 0.75, na.rm = TRUE),
-               med_min = median(Min, na.rm = TRUE), iqr_minl = quantile(Min, probs = 0.25, na.rm = TRUE), iqr_minh = quantile(Min, probs = 0.75, na.rm = TRUE),
-               med_max = median(Max, na.rm = TRUE), iqr_maxl = quantile(Max, probs = 0.25, na.rm = TRUE), iqr_maxh = quantile(Max, probs = 0.75, na.rm = TRUE),
-               med_med = median(Median, na.rm = TRUE), iqr_medl = quantile(Median, probs = 0.25, na.rm = TRUE), iqr_medh = quantile(Median, probs = 0.75, na.rm = TRUE),
-               med_mn = median(Mean, na.rm = TRUE), iqr_mnl = quantile(Mean, probs = 0.25, na.rm = TRUE), iqr_mnh = quantile(Mean, probs = 0.75, na.rm = TRUE),
-               med_sd = median(StandardDeviation, na.rm = TRUE), iqr_sdl = quantile(StandardDeviation, probs = 0.25, na.rm = TRUE), iqr_sdh = quantile(StandardDeviation, probs = 0.75, na.rm = TRUE),
-               Years = list(c(Year))), by = c("ManagedAreaName", "ParameterName")]
-
-progs <- ts2dat_c[, unlist(strsplit(ProgramIDs, split = ", ")), by = row.names(ts2dat_c)]
-progs <- sort(unique(as.integer(progs$V1)))
-
-ts2 <- distinct(ts2dat_c[, .(ManagedAreaName, ParameterName, med_n, iqr_nl, iqr_nh, med_min, iqr_minl, iqr_minh, med_max, iqr_maxl, iqr_maxh, med_med, iqr_medl, iqr_medh, med_mn, iqr_mnl, iqr_mnh, med_sd, iqr_sdl, iqr_sdh, Years)])
-
-# ts2[, `:=` (med_n = round(med_n, 0), iqr_nl = round(med_n, 0), iqr_nh = round(med_n, 0),
-#             med_min = round(med_min, 5), iqr_minl = round(iqr_minl, 5), iqr_minh = round(iqr_minh, 5), 
-#             med_max = round(med_max, 5), iqr_maxl = round(iqr_maxl, 5), iqr_maxh = round(iqr_maxh, 5), 
-#             med_med = round(med_med, 3), iqr_medl = round(iqr_medl, 3), iqr_medh = round(iqr_medh, 3), 
-#             med_mn = round(med_mn, 3), iqr_mnl = round(iqr_mnl, 3), iqr_mnh = round(iqr_mnh, 3), 
-#             med_sd = round(med_sd, 3), iqr_sdl = round(iqr_sdl, 3), iqr_sdh = round(iqr_sdh, 3))]
-
-ts2a <- melt(ts2, measure.vars = c("med_n", "iqr_nl", "iqr_nh", "med_min", "iqr_minl", "iqr_minh", "med_max", "iqr_maxl", "iqr_maxh", "med_med", "iqr_medl", "iqr_medh", "med_mn", "iqr_mnl", "iqr_mnh", "med_sd", "iqr_sdl", "iqr_sdh"), variable.name = "Statistic (annual)", value.name = "Time series value")
-
-ts2a[, quantile := ifelse(str_detect(`Statistic (annual)`, "med_"), "50%",
-                          ifelse(str_detect(`Statistic (annual)`, "iqr_"), #"25%", "75%")), by = `Statistic (annual)`]
-                                 ifelse(str_detect(`Statistic (annual)`, "l"), "25%", "75%"), NA)), by = `Statistic (annual)`]
-
-ts2a[, `Statistic (annual)` := ifelse(str_detect(`Statistic (annual)`, "med_"), 
-                                      str_to_title(str_sub(`Statistic (annual)`, 5, -1)), 
-                                      str_to_title(str_sub(`Statistic (annual)`, 5, -2))), by = `Statistic (annual)`][, `Statistic (annual)` := fcase(`Statistic (annual)` == "N", "N",
-      `Statistic (annual)` == "Min", paste0(`Statistic (annual)`, "imum"),
-      `Statistic (annual)` == "Max", paste0(`Statistic (annual)`, "imum"),
-      `Statistic (annual)` == "Med", "Median",
-      `Statistic (annual)` == "Mn", "Mean",
-      `Statistic (annual)` == "Sd", "Standard deviation"), by = `Statistic (annual)`]
-
-ts2b <- pivot_wider(ts2a, id_cols = c("ManagedAreaName", "Years", "Statistic (annual)", "quantile"), names_from = c("ParameterName"), values_from = c("Time series value"))
-
-ts2c <- pivot_wider(ts2b, id_cols = c("ManagedAreaName", "Years", "Statistic (annual)"), names_from = c("quantile"), values_from = c("Total Phosphorus", "Total Nitrogen", "Water Temperature", "Turbidity", "Salinity", "Dissolved Oxygen"))
-
-setorder(ts2c, ManagedAreaName, `Statistic (annual)`)
-setcolorder(ts2c, neworder = c("ManagedAreaName", "Years", "Statistic (annual)", "Water Temperature_25%", "Water Temperature_50%", "Water Temperature_75%", "Salinity_25%", "Salinity_50%", "Salinity_75%", "Dissolved Oxygen_25%", "Dissolved Oxygen_50%", "Dissolved Oxygen_75%", "Turbidity_25%", "Turbidity_50%", "Turbidity_75%", "Total Nitrogen_25%", "Total Nitrogen_50%", "Total Nitrogen_75%", "Total Phosphorus_25%", "Total Phosphorus_50%", "Total Phosphorus_75%"))
-
-fwrite(ts2c, here::here("ts2c.csv"))
-
-```
-
 
 ```{r eval=FALSE, include=FALSE}
 _Text based on elsarticle sample manuscript, see [http://www.elsevier.com/author-schemas/latex-instructions#elsarticle](http://www.elsevier.com/author-schemas/latex-instructions#elsarticle)_
