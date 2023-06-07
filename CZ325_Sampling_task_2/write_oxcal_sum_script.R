@@ -1,4 +1,5 @@
-
+# DEP AGREEMENT NO. CZ325 Deliverable 2b (Radiocarbon sample size for age and time-averaging determination)
+# helper function to create an OxCal program from a data from data frame of fractions and standard deviations
 # df would have name, val, sd
 write_oxcal_sum_script = function(df, path = ".", filename = "test",curvename = "bombBahamasto10000calBP_Marine20", 
   curvepath = "/Users/johnhandley/Documents/PaleontologyResearch/Oysters/HOBS/Contract work/OxCal/bombBahamasto10000calBP_Marine20.14c")

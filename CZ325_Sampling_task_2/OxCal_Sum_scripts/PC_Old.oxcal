@@ -3,13 +3,13 @@ Options()
  {
   Resolution=0.5;
   
-Curve="/Users/johnhandley/Documents/PaleontologyResearch/Oysters/HOBS/Contract work/OxCal/bombBahamasto10000calBP_Marine20.14c";
+Curve="/Users/johnhandley/Documents/PaleontologyResearch/Oysters/HOBS/Contract work/Comparisons/Kowalewski_NP/Curves/HOBS_14C_CalCurve_PredictedVals_20230524.14c";
 };
 
  Plot()
  {
  
-Curve("bombBahamasto10000calBP_Marine20","/Users/johnhandley/Documents/PaleontologyResearch/Oysters/HOBS/Contract work/OxCal/bombBahamasto10000calBP_Marine20.14c");
+Curve("HOBS_14C_CalCurve_PredictedVals_20230524","/Users/johnhandley/Documents/PaleontologyResearch/Oysters/HOBS/Contract work/Comparisons/Kowalewski_NP/Curves/HOBS_14C_CalCurve_PredictedVals_20230524.14c");
 
   sum("Sum")
   {

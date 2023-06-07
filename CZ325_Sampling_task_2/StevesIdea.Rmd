@@ -1,0 +1,126 @@
+---
+title: "Explore merging HDI's on individual specimen age posterior distributions"
+output: html_notebook
+---
+
+```{r}
+source("Utilities.R")
+```
+
+```{r}
+Guana_River_R3H1S1 %>% group_by(name) %>% summarize(HDI_Interval(data.frame(year, probability), credMass = 0.95))  -> tmp
+```
+```{r}
+Guana_River_R3H1S1 %>% group_by(name) %>% summarize(HDI_Interval(data.frame(year, probability), credMass = 0.5))  -> tmp
+s = seq(from = min(tmp$begin), to = max(tmp$begin), by = 0.5)
+d = data.frame(year = s, probability = numeric(length(s)))
+
+  for( ii in 1:nrow(tmp)){
+     pos = d$year %in% seq(from = tmp$begin[ii], to = tmp$end[ii], by = 0.5)
+     d$probability[ pos ] = d$probability[ pos ] + tmp$mass[ii]
+  }
+d$probability = d$probability/sum(d$probability)
+d %>% ggplot(aes(x = year, y = probability)) + geom_line()
+```
+Use the actual probabilities in the intervals
+```{r}
+# here are the intervals
+Guana_River_R3H1S1 %>% group_by(name) %>% summarize(HDI_Interval_Mask(data.frame(year, probability), credMass = 0.5))  -> tmp
+tmp %>% group_by(year) %>% summarize( probability = sum(probability)) -> d
+d$probability = d$probability/sum(d$probability)
+d %>% ggplot(aes(x = year, y = probability)) + geom_line()
+```
+
+
+```{r}
+res = data.frame()
+for( cred in seq(0.2, 0.90, by = 0.1)){
+Guana_River_R3H1S1 %>% group_by(name) %>% summarize(HDI_Interval(data.frame(year, probability), credMass = cred))  -> tmp
+s = seq(from = min(tmp$begin), to = max(tmp$begin), by = 0.5)
+d = data.frame(year = s, probability = numeric(length(s)))
+
+  for( ii in 1:nrow(tmp)){
+     pos = d$year %in% seq(from = tmp$begin[ii], to = tmp$end[ii], by = 0.5)
+     d$probability[ pos ] = d$probability[ pos ] + tmp$mass[ii]
+  }
+d$probability = d$probability/sum(d$probability)
+d %<>% mutate(cred = cred)
+res = rbind(res, d)
+}
+
+
+```
+
+```{r}
+
+res %>% ggplot(aes(x = year, y = probability, color = factor(cred))) + geom_line() + facet_wrap(~cred) + ggtitle("Guana River")
+```
+
+```{r}
+res = data.frame()
+for( cred in seq(0.2, 0.90, by = 0.1)){
+Goose_Island_East_Cove_R2H3S1 %>% group_by(name) %>% summarize(HDI_Interval(data.frame(year, probability), credMass = cred))  -> tmp
+s = seq(from = min(tmp$begin), to = max(tmp$begin), by = 0.5)
+d = data.frame(year = s, probability = numeric(length(s)))
+
+  for( ii in 1:nrow(tmp)){
+     pos = d$year %in% seq(from = tmp$begin[ii], to = tmp$end[ii], by = 0.5)
+     d$probability[ pos ] = d$probability[ pos ] + tmp$mass[ii]
+  }
+d$probability = d$probability/sum(d$probability)
+d %<>% mutate(cred = cred)
+res = rbind(res, d)
+}
+
+
+```
+
+```{r}
+res %>% ggplot(aes(x = year, y = probability, color = factor(cred))) + geom_line() + facet_wrap(~cred) + ggtitle("Goose Island/East Cove Reef 2") + xlim(c(1960,2020))
+```
+
+```{r}
+res = data.frame()
+for( cred in seq(0.2, 0.90, by = 0.1)){
+Goose_Island_East_Cove_R4H3S1 %>% group_by(name) %>% summarize(HDI_Interval(data.frame(year, probability), credMass = cred))  -> tmp
+s = seq(from = min(tmp$begin), to = max(tmp$begin), by = 0.5)
+d = data.frame(year = s, probability = numeric(length(s)))
+
+  for( ii in 1:nrow(tmp)){
+     pos = d$year %in% seq(from = tmp$begin[ii], to = tmp$end[ii], by = 0.5)
+     d$probability[ pos ] = d$probability[ pos ] + tmp$mass[ii]
+  }
+d$probability = d$probability/sum(d$probability)
+d %<>% mutate(cred = cred)
+res = rbind(res, d)
+}
+
+```
+
+```{r}
+res %>% ggplot(aes(x = year, y = probability, color = factor(cred))) + geom_line() + facet_wrap(~cred) + ggtitle("Goose Island/East Cove Reef 4") + xlim(c(1960,2020))
+```
+
+```{r}
+res = data.frame()
+for( cred in seq(0.2, 0.90, by = 0.1)){
+Pellicer_Creek_R3H2S2 %>% group_by(name) %>% summarize(HDI_Interval(data.frame(year, probability), credMass = cred))  -> tmp
+s = seq(from = min(tmp$begin), to = max(tmp$begin), by = 0.5)
+d = data.frame(year = s, probability = numeric(length(s)))
+
+  for( ii in 1:nrow(tmp)){
+     pos = d$year %in% seq(from = tmp$begin[ii], to = tmp$end[ii], by = 0.5)
+     d$probability[ pos ] = d$probability[ pos ] + tmp$mass[ii]
+  }
+d$probability = d$probability/sum(d$probability)
+d %<>% mutate(cred = cred)
+res = rbind(res, d)
+}
+
+```
+
+```{r}
+res %>% ggplot(aes(x = year, y = probability, color = factor(cred))) + geom_line() + facet_wrap(~cred) + ggtitle("Pellicer Creek Reef") + xlim(c(1960,2020))
+```
+
+

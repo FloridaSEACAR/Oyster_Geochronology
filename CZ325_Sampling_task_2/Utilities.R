@@ -1,5 +1,5 @@
-# Utils
 
+# DEP AGREEMENT NO. CZ325 Deliverable 1a:	Modeling approach to age and time-averaging estimation
 # Helper function to make random draws from a posterior distribution
 
 
@@ -66,7 +66,7 @@ CPE = function(posterior_distribution){
 }
 
 
-# highest density interval
+# length of highest density interval
 HDI = function(posterior_distribution, credMass = 0.95){
   require(HDInterval)
   #hdi = hdi(density(RandomEmpirical(n = 1000, posterior_distribution)), allowSplit=TRUE, credMass = credMass)
@@ -75,7 +75,54 @@ HDI = function(posterior_distribution, credMass = 0.95){
   return(sum(hdi[,2]-hdi[,1])) # need the sum because there could be multiple intervals
 }
 
+# highest density interval
+HDI_Interval = function(posterior_distribution, credMass = 0.95){
+  require(HDInterval)
+  #hdi = hdi(density(RandomEmpirical(n = 1000, posterior_distribution)), allowSplit=TRUE, credMass = credMass)
+  hdi = hdi(structure(list(x = posterior_distribution$year, y = posterior_distribution$probability, bw = 1, n = 1000, call = "posterior", data.name = "x", has.na = FALSE), class = "density"
+                      , names = c("x","y","bw", "n", "call","data.name","has.na")), allowSplit=TRUE, credMass = credMass)
+  d = data.frame( )
+  c = cumsum(posterior_distribution$probability)
+  for( ii in 1:nrow(hdi))
 
+    d = rbind(d, data.frame(begin = hdi[ii,1]
+                            , end = hdi[ii,2]
+                            , mass = c[posterior_distribution$year == hdi[ii,2]]-c[posterior_distribution$year == hdi[ii,1]]
+                            , length = hdi[ii,2]-hdi[ii,1]+1
+                            , density = (c[posterior_distribution$year == hdi[ii,2]]-c[posterior_distribution$year == hdi[ii,1]])/(hdi[ii,2]-hdi[ii,1]+1)))
+  return(d) 
+}
+
+# zero out everything except highest density interval
+HDI_Interval_Mask = function(posterior_distribution, credMass = 0.95){
+  require(HDInterval)
+  #hdi = hdi(density(RandomEmpirical(n = 1000, posterior_distribution)), allowSplit=TRUE, credMass = credMass)
+  hdi = hdi(structure(list(x = posterior_distribution$year, y = posterior_distribution$probability, bw = 1, n = 1000, call = "posterior", data.name = "x", has.na = FALSE), class = "density"
+                      , names = c("x","y","bw", "n", "call","data.name","has.na")), allowSplit=TRUE, credMass = credMass)
+  d = data.frame( )
+  p = posterior_distribution
+  p$probability = 0
+  pos = NULL
+  for( ii in 1:nrow(hdi))
+   {
+    pos =c(pos, which(p$year >= hdi[ii,1] & p$year <= hdi[ii,2])) 
+  }
+  
+   p$probability[pos] = posterior_distribution$probability[pos]
+    
+  return(p) 
+}
+
+# posterior_distribution contains a data frame of multiple posterior distributions
+# this will produce an average of hdi's of each posterior
+HDI_of_HDI = function(posterior_distribution,credMass = 0.5){
+  n = length(unique(posterior_distribution$name))
+  posterior_distribution %>% group_by(name) %>% reframe(HDI_Interval_Mask(data.frame(year, probability), credMass = credMass))  -> tmp
+  tmp %>% group_by(year) %>% summarize( probability = sum(probability)) -> d
+  d$probability = d$probability/n # average over names
+  d$probability = d$probability/sum(d$probability)
+  return(HDI(d, credMass = credMass)) # could use another credMass
+}
 
 #95% HDI on TAV
 
@@ -121,6 +168,9 @@ StandardDeviation = function( res, pop_val){
   return( mean( (res - pop_val)*(res - pop_val)))
 }
 
+Median = function(p){
+ return(p$year[min(which(cumsum(p$probability) >= 0.5))])
+}
 
 
 

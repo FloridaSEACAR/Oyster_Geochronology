@@ -3,7 +3,7 @@ title: "New Guana River"
 output: html_notebook
 ---
 
-
+DEP AGREEMENT NO. CZ325 Deliverable 2b (Radiocarbon sample size for age and time-averaging determination)
 ```{r}
 library(tidyverse)
 library(magrittr)
@@ -13,14 +13,18 @@ library(readxl)
 library(oxcAAR)
 setOxcalExecutablePath("/Users/johnhandley/Documents/PaleontologyResearch/Oysters/HOBS/Contract work/OxCal/bin/OxCalMac")
 ```
+DEP AGREEMENT NO. CZ325, Deliverable 1a (Modeling approach to age and time-averaging estimation)
 ```{r}
 source("Utilities.R")
 ```
 
+Set up new 
 Helper function to creat calendar dates from fractions madern
 ```{r}
 source("write_oxcal_sum_script.R")
-oxcARR_Calibration = function(fractions, sample_name = "TEST", curvename = "bombBahamasto10000calBP_Marine20",curvepath = "/Users/johnhandley/Documents/PaleontologyResearch/Oysters/HOBS/Contract work/OxCal/bombBahamasto10000calBP_Marine20.14c"){
+source("SetUpNewCurve.R") # sets up globals curvename, curverpath
+
+oxcARR_Calibration = function(fractions, sample_name = "TEST", curvename = "HOBS_14C_CalCurve_PredictedVals_20230524",curvepath = "/Users/johnhandley/Documents/PaleontologyResearch/Oysters/HOBS/Contract work/Comparisons/Kowalewski_NP/Curves/HOBS_14C_CalCurve_PredictedVals_20230524.14c"){
 
 shell_names = unique(fractions$name)
 code = write_oxcal_sum_script(fractions, path = "OxCal_Sum_scripts", filename = sample_name,curvename = curvename,curvepath = curvepath)
@@ -81,8 +85,8 @@ SpecNames_Xwalk %>% filter(grepl("GR_R3H1S1", Sample_ID))
 Get the original HOBS data
 ```{r}
 
-HOBSGeo_Apps_202208_final = read_xlsx("HOBSGeo_Apps_202208_final.xlsx", sheet = "DR3", skip = 31 )
-HOBSGeo_Apps_202208_final %>% filter(Locality == "Guana River") -> GR_Old
+HOBSGeo_Apps_202208_final.DR3 = read_xlsx("HOBSGeo_Apps_202208_final.xlsx", sheet = "DR3", skip = 31 )
+HOBSGeo_Apps_202208_final.DR3 %>% filter(Locality == "Guana River") -> GR_Old
 
 GR_Old %<>% filter(Station == 8855) %>% select(Cat_No,F14C_corr,F14C_corr_sd,Depth,Station)
 names(GR_Old) = c("name", "F14C_corr","F14C_corr_sd","Depth","Station")
@@ -101,6 +105,9 @@ Run the new through the Calibration
 ```{r}
 GR_New_posteriors = oxcARR_Calibration(GR_New, sample_name = "GR_New")
 ```
+```{r}
+GR_New_posteriors %>% filter(name != "Sum") %>% ggplot(aes(x = year, y = probability, color = name)) + geom_line(show.legend = FALSE) #+ xlim(c(1950,2020))
+```
 
 ```{r}
 GR_New_posteriors %>% filter(name != "Sum") %>% ggplot(aes(x = year, y = probability, color = name)) + geom_line(show.legend = FALSE)+ xlim(c(1950,2020))
@@ -112,6 +119,7 @@ Guana_River_R3H1S1 = rbind(GR_Old_posteriors %>% filter(name != "Sum"),GR_New_po
 ```
 
 ```{r}
+source("Utilities.R")
  Guana_River_R3H1S1_names = unique((Guana_River_R3H1S1  %>% select(name))$name) 
  Guana_River_R3H1S1_results = data.frame()
  set.seed(1234)
@@ -120,15 +128,75 @@ for( n in 2:length(Guana_River_R3H1S1_names)){
         random_sample = sample(Guana_River_R3H1S1_names, size = n, replace = FALSE)
         tmp = Guana_River_R3H1S1 %>% filter(name %in% random_sample)
         Guana_River_R3H1S1_results = rbind(Guana_River_R3H1S1_results
-            , data.frame( n = n, cpe = CPE(tmp)$cpe, tav_iqr =CPE(tmp)$tav_iqr, cr_0.95 = CR_95_TAV(tmp), tav_hdi = HDI_95_TAV(tmp))) #, ETA = ETA(tmp) ))
+            , data.frame( n = n, cpe = CPE(tmp)$cpe
+                               , tav_iqr =CPE(tmp)$tav_iqr
+                               , cr_0.95 = CR_95_TAV(tmp)
+                               , tav_hdi = HDI_95_TAV(tmp)
+                               , hdi_of_hdi = HDI_of_HDI(tmp, credMass = 0.5)
+                               , Median = Median(TAV(tmp)))) 
      }
 }
- write_rds(Guana_River_R3H1S1_results,"Guana_River_R3H1S1_results.RDS")
+ 
 ```
 
 ```{r}
-Guana_River_R3H1S1_results %>% reshape2::melt("n") %>% ggplot(aes(x = n, y = value)) + geom_jitter(width = 0.2) + geom_smooth(color = "orange") + facet_wrap(~variable) + ggtitle("Guana River")
+ write_rds(Guana_River_R3H1S1_results,"Guana_River_R3H1S1_results.RDS")
 ```
+
+Original Shells, new calibration curve
+```{r}
+Old_posteriors = GR_Old_posteriors
+Old_fractions = GR_Old
+GR_Old_results = data.frame(n = nrow(Old_fractions), cpe = CPE(Old_posteriors)$cpe
+                            , tav_iqr =  CPE(Old_posteriors)$tav_iqr
+                            , Median = Median(TAV(Old_posteriors))
+                            , cr_0.95 = CR_95_TAV(Old_posteriors)
+                            , tav_hdi = HDI_95_TAV(Old_posteriors)
+                            , hdi_of_hdi = HDI_of_HDI(Old_posteriors, credMass = 0.5))
+```
+
+This is the results for the original data but new curve
+```{r}
+write_rds(GR_Old_results, "Guana_River_Old_Data_New_Curve_results.RDS")
+```
+
+```{r}
+HOBSGeo_Apps_202208_final.DR1 = read_xlsx("HOBSGeo_Apps_202208_final.xlsx", sheet = "DR1", skip = 21 )
+names(HOBSGeo_Apps_202208_final.DR1) = c("Locality",	"Station",	"Lat",	"Lon",	"IGSN",	"Depth",	"N", "Median",	"Min",	"Max","IQR_AER",	"IQR_TAV",	"IQR_CPE")
+HOBSGeo_Apps_202208_final.DR1 %>% filter(Station == 8855) %>% select(N, Median,IQR_TAV,IQR_CPE) %>% data.frame() -> GR_original_estimates
+```
+
+Original Data, Original Curve
+```{r}
+write_rds(GR_original_estimates, "GR_original_estimates.RDS")
+```
+
+```{r}
+Guana_River_R3H1S1_results %>% select(-Median) %>% reshape2::melt("n") %>% ggplot(aes(x = n, y = value)) + geom_jitter(width = 0.2, alpha =0.1, size = 0.5) + geom_smooth(color = "orange") + facet_wrap(~variable) + ggtitle("Guana River")
+```
+
+```{r}
+Guana_River_R3H1S1_results %>% select(n,Median) %>% reshape2::melt("n") %>% ggplot(aes(x = n, y = value)) + geom_jitter(width = 0.2, alpha =0.1, size = 0.5) + geom_smooth(color = "orange") + geom_point(data = GR_original_estimates, aes(x = N, y = Median,color = "Original Curve"), size = 2) + geom_point(data = GR_Old_results, aes(x = n, y = Median, color = "New Curve"), size = 2) + ggtitle("Guana River") + ylab("Median")
+```
+
+```{r}
+Guana_River_R3H1S1_results %>% select(n,cpe) %>% reshape2::melt("n") %>% ggplot(aes(x = n, y = value)) + geom_jitter(width = 0.2, alpha =0.1, size = 0.5) + geom_smooth(color = "orange") + geom_point(data = GR_original_estimates, aes(x = N, y = IQR_CPE,color = "Original Curve"), size = 2)  + geom_point(data = GR_Old_results, aes(x = n, y = cpe, color = "New Curve"), size = 2) + ggtitle("Guana River") + ylab("IQR_CPE")
+```
+```{r}
+Guana_River_R3H1S1_results %>% select(n,tav_iqr) %>% reshape2::melt("n") %>% ggplot(aes(x = n, y = value)) + geom_jitter(width = 0.2, alpha =0.1, size = 0.5) + geom_smooth(color = "orange") + geom_point(data = GR_original_estimates, aes(x = N, y = IQR_TAV,color = "Original Curve"), size = 2) + geom_point(data = GR_Old_results, aes(x = n, y = tav_iqr, color = "New Curve"), size = 2)  + ggtitle("Guana River") + ylab("IQR_TAV")
+```
+```{r}
+Guana_River_R3H1S1_results %>% select(n,cr_0.95) %>% reshape2::melt("n") %>% ggplot(aes(x = n, y = value)) + geom_jitter(width = 0.2, alpha =0.1, size = 0.5) + geom_smooth(color = "orange")  + geom_point(data = GR_Old_results, aes(x = n, y = cr_0.95, color = "New Curve"), size = 2)  + ggtitle("Guana River") + ylab("cr_0.95")
+```
+
+```{r}
+Guana_River_R3H1S1_results %>% select(n,tav_hdi) %>% reshape2::melt("n") %>% ggplot(aes(x = n, y = value)) + geom_jitter(width = 0.2, alpha =0.1, size = 0.5) + geom_smooth(color = "orange")  + geom_point(data = GR_Old_results, aes(x = n, y = tav_hdi, color = "New Curve"), size = 2)  + ggtitle("Guana River") + ylab("tav_hdi")
+```
+
+```{r}
+Guana_River_R3H1S1_results %>% select(n,hdi_of_hdi) %>% reshape2::melt("n") %>% ggplot(aes(x = n, y = value)) + geom_jitter(width = 0.2, alpha =0.1, size = 0.5) + geom_smooth(color = "orange")  + geom_point(data = GR_Old_results, aes(x = n, y = hdi_of_hdi, color = "New Curve"), size = 2)  + ggtitle("Guana River") + ylab("hdi_of_hdi")
+```
+
 
 ```{r}
 pop_values = last(Guana_River_R3H1S1_results)
@@ -140,7 +208,9 @@ cr_0.95.tmp = Guana_River_R3H1S1_results %>% group_by(n) %>% dplyr::summarize( c
 
 tav_hdi.tmp = Guana_River_R3H1S1_results %>% group_by(n) %>% dplyr::summarize( tav_hdi_Bias = Bias(tav_hdi, pop_values$tav_hdi), tav_hdi_SD = StandardDeviation(tav_hdi, pop_values$tav_hdi), tav_hdi_CV =  StandardDeviation(tav_hdi, pop_values$tav_hdi)/pop_values$tav_hdi)%>% select(-n)
 
-Guana_River_R3H1S1_summary = round(cbind(cpe.tmp,tav_iqr.tmp,cr_0.95.tmp,tav_hdi.tmp), 3)
+hdi_of_hdi.tmp = Guana_River_R3H1S1_results %>% group_by(n) %>% dplyr::summarize( hdi_of_hdi_Bias = Bias(hdi_of_hdi, pop_values$hdi_of_hdi), hdi_of_hdi_SD = StandardDeviation(hdi_of_hdi, pop_values$hdi_of_hdi), hdi_of_hdi_CV =  StandardDeviation(hdi_of_hdi, pop_values$hdi_of_hdi)/pop_values$hdi_of_hdi)%>% select(-n)
+
+Guana_River_R3H1S1_summary = round(cbind(cpe.tmp,tav_iqr.tmp,cr_0.95.tmp,tav_hdi.tmp,hdi_of_hdi.tmp), 3)
 ```
 
 ```{r}

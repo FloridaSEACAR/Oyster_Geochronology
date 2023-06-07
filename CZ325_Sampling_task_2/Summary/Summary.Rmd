@@ -1,0 +1,169 @@
+---
+title: "Summary of methods"
+output: html_notebook
+---
+DEP AGREEMENT NO. CZ325 Deliverable 2b (Radiocarbon sample size for age and time-averaging determination)
+In this notebook, we summarize the simulation results for each of the methods and each of the localities.
+All of the RDS files are produced by separate notebooks. There are separate versions of for the ad hoc methods and the non-parametric
+method of Heaton.
+
+These files are used for simulations using ad hoc methods.
+"Old_New_GR.Rmd"
+"Old_New PC.Rmd"
+"Old_New GI_EC_R2.Rmd"
+"Old_New GI_EC_R4.Rmd"
+
+These files are used for simulations using Heaton's nonparametric methods.
+"GR_Heaton.Rmd"
+"PC_Heaton.Rmd"
+"GI_EC_R2_Heaton.Rmd"
+"GI_EC_R4_Heaton.Rmd"
+
+
+```{r}
+library(tidyverse)
+library(magrittr)
+library(reshape2)
+```
+
+Read in results from original data and original curve
+N Median IQR_TAV IQR_CPE
+```{r}
+GR_original_estimates = readRDS("GR_original_estimates.RDS")
+GR_original_estimates %<>% mutate(Locality = "Guana_River")
+
+PC_original_estimates = readRDS("PC_original_estimates.RDS")
+PC_original_estimates %<>% mutate(Locality = "Pellicer_Creek")
+
+GI_EC_R2_original_estimates = readRDS("GI_EC_R2_original_estimates.RDS")
+GI_EC_R2_original_estimates %<>% mutate(Locality = "Goose_Island_East_Cove_Reef_2")
+
+GI_EC_R4_original_estimates = readRDS("GI_EC_R4_original_estimates.RDS")
+GI_EC_R4_original_estimates %<>% mutate(Locality = "Goose_Island_East_Cove_Reef_4")
+
+All_original_estimates = rbind(GR_original_estimates,PC_original_estimates,GI_EC_R2_original_estimates,GI_EC_R4_original_estimates)
+```
+
+Read in results of new curve but original data
+```{r}
+Guana_River_Old_Data_New_Curve_results = readRDS("Guana_River_Old_Data_New_Curve_results.RDS")
+Guana_River_Old_Data_New_Curve_results %<>% mutate(Locality = "Guana_River")
+
+Pellicer_Creek_Old_Data_New_Curve_results = readRDS("Pellicer_Creek_Old_Data_New_Curve_results.RDS")
+Pellicer_Creek_Old_Data_New_Curve_results %<>% mutate(Locality = "Pellicer_Creek")
+
+Goose_Island_East_Cove_R2H3S1_Old_Data_New_Curve_results = readRDS("Goose_Island_East_Cove_R2H3S1_Old_Data_New_Curve_results.RDS")
+Goose_Island_East_Cove_R2H3S1_Old_Data_New_Curve_results %<>% mutate(Locality = "Goose_Island_East_Cove_Reef_2")
+
+Goose_Island_East_Cove_R4H3S1_Old_Data_New_Curve_results = readRDS("Goose_Island_East_Cove_R4H3S1_Old_Data_New_Curve_results.RDS")
+Goose_Island_East_Cove_R4H3S1_Old_Data_New_Curve_results %<>% mutate(Locality = "Goose_Island_East_Cove_Reef_4")
+
+All_Old_Data_New_Curve_results = rbind(Guana_River_Old_Data_New_Curve_results,Pellicer_Creek_Old_Data_New_Curve_results,Goose_Island_East_Cove_R2H3S1_Old_Data_New_Curve_results,Goose_Island_East_Cove_R4H3S1_Old_Data_New_Curve_results)
+
+```
+
+Read in results of Heaton's Nonparametric method
+```{r}
+Guana_River = readRDS("GR_All_NP_results.RDS")
+Guana_River %<>% mutate(Locality = "Guana_River")
+
+Pellicer_Creek = readRDS("PC_All_NP_results.RDS")
+Pellicer_Creek %<>% mutate(Locality = "Pellicer_Creek")
+
+Goose_Island_East_Cove_Reef_2 = readRDS("GI_EC_R2_All_NP_results.RDS")
+Goose_Island_East_Cove_Reef_2 %<>% mutate(Locality = "Goose_Island_East_Cove_Reef_2")
+
+Goose_Island_East_Cove_Reef_4 = readRDS("GI_EC_R4_All_NP_results.RDS")
+Goose_Island_East_Cove_Reef_4 %<>% mutate(Locality = "Goose_Island_East_Cove_Reef_4")
+
+All_NP = rbind(Guana_River,Pellicer_Creek,Goose_Island_East_Cove_Reef_2,Goose_Island_East_Cove_Reef_4)
+```
+
+Do some summary plots of the nonparametric methods for median age by Locality.
+
+```{r}
+All_NP  %>% ggplot(aes(x = n, y = Median)) + geom_jitter(width = 0.2) + geom_smooth(color = "orange") + facet_wrap(~Locality)  + ggtitle("NP Median")
+```
+
+```{r}
+All_NP  %>% ggplot(aes(x = n, y = NP_IQR)) + geom_jitter(width = 0.2) + geom_smooth(color = "orange") + facet_wrap(~Locality) + ggtitle("NP_IQR")
+```
+```{r}
+All_NP  %>% ggplot(aes(x = n, y = NP_95)) + geom_jitter(width = 0.2) + geom_smooth(color = "orange") + facet_wrap(~Locality) + ggtitle("NP_95")
+```
+
+```{r}
+All_NP  %>% ggplot(aes(x = n, y = NP_HDI)) + geom_jitter(width = 0.2) + geom_smooth(color = "orange") + facet_wrap(~Locality) + ggtitle("NP_HDI")
+```
+
+```{r}
+All_NP  %>% filter(Locality == "Guana_River") %>% select(-Median, -Locality) %>% reshape2::melt("n") %>% group_by(variable) %>% ggplot(aes(x = n, y = value)) + geom_jitter(width = 0.2) + geom_smooth(color = "orange") + facet_wrap(~variable) + ggtitle("Guana_River")
+```
+
+```{r}
+All_NP  %>% filter(Locality == "Pellicer_Creek") %>% select(-Median, -Locality) %>% reshape2::melt("n") %>% group_by(variable) %>% ggplot(aes(x = n, y = value)) + geom_jitter(width = 0.2) + geom_smooth(color = "orange") + facet_wrap(~variable) + ggtitle("Pellicer_Creek")
+```
+
+```{r}
+All_NP  %>% filter(Locality == "Goose_Island_East_Cove_Reef_2") %>% select(-Median, -Locality) %>% reshape2::melt("n") %>% group_by(variable) %>% ggplot(aes(x = n, y = value)) + geom_jitter(width = 0.2) + geom_smooth(color = "orange") + facet_wrap(~variable) + ggtitle("Goose_Island_East_Cove_Reef_2")
+```
+
+```{r}
+All_NP  %>% filter(Locality == "Goose_Island_East_Cove_Reef_4") %>% select(-Median, -Locality) %>% reshape2::melt("n") %>% group_by(variable) %>% ggplot(aes(x = n, y = value)) + geom_jitter(width = 0.2) + geom_smooth(color = "orange") + facet_wrap(~variable) + ggtitle("Goose_Island_East_Cove_Reef_4")
+```
+
+
+Read in the ad hoc results
+```{r}
+Guana_River_R3H1S1_results = readRDS("Guana_River_R3H1S1_results.RDS")
+Guana_River_R3H1S1_results %<>% mutate(Locality = "Guana_River")
+
+Pellicer_Creek_R3H2S2_results = readRDS("Pellicer_Creek_R3H2S2_results.RDS")
+Pellicer_Creek_R3H2S2_results %<>% mutate(Locality = "Pellicer_Creek")
+
+Goose_Island_East_Cove_R2H3S1_results = readRDS("Goose_Island_East_Cove_R2H3S1_results.RDS")
+Goose_Island_East_Cove_R2H3S1_results %<>% mutate(Locality = "Goose_Island_East_Cove_Reef_2")
+
+Goose_Island_East_Cove_R4H3S1_results = readRDS("Goose_Island_East_Cove_R4H3S1_results.RDS")
+Goose_Island_East_Cove_R4H3S1_results %<>% mutate(Locality = "Goose_Island_East_Cove_Reef_4")
+
+All_ad_hoc_results = rbind(Guana_River_R3H1S1_results,Pellicer_Creek_R3H2S2_results,Goose_Island_East_Cove_R2H3S1_results,Goose_Island_East_Cove_R4H3S1_results)
+```
+
+
+```{r}
+All_ad_hoc_results %>% filter(Median <= 2023) %>% ggplot(aes(x = n, y = Median)) + geom_jitter(width = 0.2) + geom_smooth(color = "orange") + 
+  geom_point(data = All_Old_Data_New_Curve_results, aes( x  = n, y = Median, color = "Original Data New Curve"), size = 2) + 
+  geom_point(data = All_original_estimates, aes( x  = N, y = Median, color = "Original Data Original Curve"), size = 2) + 
+  facet_wrap(~Locality)  + ggtitle("TAV Median")
+```
+
+```{r}
+All_ad_hoc_results %>% ggplot(aes(x = n, y = cpe)) + geom_jitter(width = 0.2) + geom_smooth(color = "orange") + 
+    geom_point(data = All_Old_Data_New_Curve_results, aes( x  = n, y = cpe, color = "Original Data New Curve"), size = 2) + 
+  geom_point(data = All_original_estimates, aes( x  = N, y = IQR_CPE, color = "Original Data Original Curve"), size = 2) + 
+  facet_wrap(~Locality)  + ggtitle("CPE")
+```
+```{r}
+All_ad_hoc_results %>% ggplot(aes(x = n, y = tav_iqr)) + geom_jitter(width = 0.2) + geom_smooth(color = "orange") + 
+    geom_point(data = All_Old_Data_New_Curve_results, aes( x  = n, y = tav_iqr, color = "Original Data New Curve"), size = 2) + 
+  geom_point(data = All_original_estimates, aes( x  = N, y = IQR_TAV, color = "Original Data Original Curve"), size = 2) + 
+  facet_wrap(~Locality)  + ggtitle("TAV IQR")
+```
+
+```{r}
+All_ad_hoc_results %>% ggplot(aes(x = n, y = cr_0.95)) + geom_jitter(width = 0.2) + geom_smooth(color = "orange") + 
+    geom_point(data = All_Old_Data_New_Curve_results, aes( x  = n, y = cr_0.95, color = "Original Data New Curve"), size = 2) + 
+  facet_wrap(~Locality)  + ggtitle("TAV CR 0.95")
+```
+```{r}
+All_ad_hoc_results %>% ggplot(aes(x = n, y = tav_hdi)) + geom_jitter(width = 0.2) + geom_smooth(color = "orange") + 
+    geom_point(data = All_Old_Data_New_Curve_results, aes( x  = n, y = tav_hdi, color = "Original Data New Curve"), size = 2) + 
+  facet_wrap(~Locality)  + ggtitle("TAV HDI 0.95")
+```
+
+```{r}
+All_ad_hoc_results %>% ggplot(aes(x = n, y = hdi_of_hdi)) + geom_jitter(width = 0.2) + geom_smooth(color = "orange") + 
+    geom_point(data = All_Old_Data_New_Curve_results, aes( x  = n, y = hdi_of_hdi, color = "Original Data New Curve"), size = 2) + 
+  facet_wrap(~Locality)  + ggtitle("TAV HDI (0.5) of HDI (0.5)")
+```
