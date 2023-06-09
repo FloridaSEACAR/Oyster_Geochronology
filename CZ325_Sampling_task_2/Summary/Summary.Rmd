@@ -82,7 +82,7 @@ All_NP = rbind(Guana_River,Pellicer_Creek,Goose_Island_East_Cove_Reef_2,Goose_Is
 Do some summary plots of the nonparametric methods for median age by Locality.
 
 ```{r}
-All_NP  %>% ggplot(aes(x = n, y = Median)) + geom_jitter(width = 0.2) + geom_smooth(color = "orange") + facet_wrap(~Locality)  + ggtitle("NP Median")
+All_NP  %>% ggplot(aes(x = n, y = Median)) + geom_jitter(width = 0.2) + geom_smooth(color = "orange") + facet_wrap(~Locality)  + ggtitle("NP Median") + ylab("Median calibrated age (calendar year)")
 ```
 
 ```{r}
@@ -135,7 +135,7 @@ All_ad_hoc_results = rbind(Guana_River_R3H1S1_results,Pellicer_Creek_R3H2S2_resu
 All_ad_hoc_results %>% filter(Median <= 2023) %>% ggplot(aes(x = n, y = Median)) + geom_jitter(width = 0.2) + geom_smooth(color = "orange") + 
   geom_point(data = All_Old_Data_New_Curve_results, aes( x  = n, y = Median, color = "Original Data New Curve"), size = 2) + 
   geom_point(data = All_original_estimates, aes( x  = N, y = Median, color = "Original Data Original Curve"), size = 2) + 
-  facet_wrap(~Locality)  + ggtitle("TAV Median")
+  facet_wrap(~Locality)  + ggtitle("TAV Median") + ylab("Median calibrated age (calendar year)")
 ```
 
 ```{r}
