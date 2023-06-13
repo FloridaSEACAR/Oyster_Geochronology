@@ -1,0 +1,387 @@
+---
+title: "Estero Bay Shell Height Sample Size"
+output: html_notebook
+---
+
+CZ325 Task 3: Evaluation of sample size to assess managed-area-level trends Deliverable 3a:
+
+```{r}
+library(cmdstanr)
+library(rstan)
+library(posterior)
+library(bayesplot)
+library(magrittr)
+library(tidyverse)
+library(spBayes)
+library(MBA)
+#library(geoR)
+library(fields)
+library(sp)
+library(maptools)
+library(rgdal)
+library(classInt)
+library(lattice)
+library(RColorBrewer)
+
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+
+library(leaflet)
+```
+
+
+Look at some real data
+```{r}
+oysterraw_2022_06_30 = readRDS("oysterraw_2022-06-30_wcoords.rds")
+```
+UniversalReefID
+
+First, we look at shell height as a response
+```{r}
+oysterraw_2022_06_30 %>% dplyr::select(ShellHeight_mm, ManagedAreaName,SampleDate,ShellHeight_mm, ObsIndex, Latitude, Longitude,UniversalReefID) %>% na.omit() %>% filter(ManagedAreaName == "Estero Bay Aquatic Preserve") -> Estero_Bay_shell_height
+```
+
+Looks like 58 sites
+```{r}
+Estero_Bay_shell_height %>% group_by(UniversalReefID) %>% summarize( n = n())
+```
+use average UniversalReefID lat lon for position of UniversalReefID
+This data set has multiple shell height observations per UniversalReefID site
+ShellHeight_mm ManagedAreaName             SampleDate          ObsIndex Latitude Longitude UniversalReefID mean_lat mean_lon DaysSince group
+```{r}
+Estero_Bay_shell_height %>% dplyr::select( UniversalReefID, Latitude,Longitude) %>%  group_by(UniversalReefID) %>% summarize( mean_lat = mean(Latitude), mean_lon = mean(Longitude) ) %>% distinct() -> UI2LL
+left_join(Estero_Bay_shell_height,UI2LL,by = join_by(UniversalReefID)) %>% mutate(DaysSince = (SampleDate - min(SampleDate))/3600/24 ) %>% group_by(UniversalReefID) %>% mutate( group = cur_group_id()) -> Estero_Bay_Data
+```
+
+Fit the Baysian model for
+Mean shell heights that vary by space
+Total execution time: 3893.9/3600 = 1.08
+```{r}
+
+Data = list( N =  nrow(Estero_Bay_Data)
+             ,  y = Estero_Bay_Data$ShellHeight_mm
+             , x = as.numeric(Estero_Bay_Data$DaysSince) # this can be used for growth calculations
+             , G = max(Estero_Bay_Data$group)
+             , group = Estero_Bay_Data$group
+             , positions = (Estero_Bay_Data %>% dplyr::select(mean_lon, mean_lat, group) %>% distinct() %>% arrange(group))[,c("mean_lon","mean_lat")]
+             )
+              
+ 
+spatial_mean_RE.mod <- cmdstan_model("spatial_mean_RE.stan")
+
+ spatial_mean_RE.EsteroBay.Shell_Height =  spatial_mean_RE.mod$sample(
+    data = Data,
+    seed = 1111, 
+    chains = 4, # 8
+    parallel_chains = 4, # 8
+    refresh = 1000,
+    iter_warmup = 5000, 
+    iter_sampling = 5000,
+    thin =  1
+    #, adapt_delta = 0.99
+  )
+```
+
+Standard Deviation of posterior distribution of mean shell_height_mm estimate per site as a function of sample size
+```{r}
+data.frame(empirical_mean = (Estero_Bay_Data %>% group_by(UniversalReefID) %>% summarize( empirical_mean = mean(ShellHeight_mm)))$empirical_mean, fitted_mean = spatial_mean_RE.EsteroBay.Shell_Height$summary("site_mean")$mean) %>% 
+  ggplot(aes(x = empirical_mean, y = fitted_mean)) + geom_point() + geom_smooth() + ggtitle("Estero Bay")
+```
+
+
+Standard Deviation of posterior distribution of mean shell_height_mm estimate per site as a function of sample size
+```{r}
+sd_by_sample_size = data.frame(sample_size = (Estero_Bay_Data %>% group_by(UniversalReefID) %>% summarize( n = n()))$n, sd = spatial_mean_RE.EsteroBay.Shell_Height$summary("site_mean")$sd)
+```
+
+
+```{r}
+rbind(Estero_Bay_Data %>% group_by(UniversalReefID) %>% summarize( sample_size = n(), sd = sd(ShellHeight_mm)/sqrt(n())) %>% dplyr::select(sample_size, sd) %>% mutate(method = "empirical"),
+sd_by_sample_size %>% mutate(method = "spatial model")) %>% ggplot(aes(x = sample_size, y = sd, color = method)) + geom_point() + geom_smooth( show.legend = FALSE) + facet_wrap(~method) + theme(legend.position="none")
+
+```
+
+```{r}
+ggsave("sd_by_sample_size.png", height = 5)
+```
+
+
+Density of shell heights
+```{r}
+Estero_Bay_Data %>% ggplot(aes(x = ShellHeight_mm)) + geom_histogram()
+```
+
+
+
+
+Regular grid inside the convex hull of the original points
+```{r}
+grid = spsample(Polygon(Data$positions[chull(Data$positions),]), n = 256, type = "regular")
+new_positions = grid@coords
+```
+
+Prediction: draw from the relevant posterior distributions
+```{r}
+source("SpatialPredictionUtilities.R")
+alpha_posterior = spatial_mean_RE.EsteroBay.Shell_Height$draws("sigma", format = "draws_matrix") # 4 chains 5000 draws after 5000 warmup
+rho_posterior = spatial_mean_RE.EsteroBay.Shell_Height$draws("length_scale", format = "draws_matrix")
+obs_gp_function_posterior = spatial_mean_RE.EsteroBay.Shell_Height$draws("gp_function", format = "draws_matrix")
+obs_distances =  my_calc_point_distances(Data$positions)
+pred_distances =  my_calc_point_distances(new_positions)
+obs_to_pred_distances = my_calc_point_distances(Data$positions, new_positions)
+global_mean_posterior = spatial_mean_RE.EsteroBay.Shell_Height$draws("global_mean", format = "draws_matrix")
+```
+
+
+```{r}
+mean_preds <- matrix(NA, nrow = 100, ncol = NROW(new_positions))
+for(i in 1:NROW(gp_preds)){
+  #cat('Processing posterior draw', i, 'of 5...\n')
+  mean_preds[i,] <- predict_mean(as.numeric(global_mean_posterior[i,]), obs_distances = obs_distances,
+                             pred_distances = pred_distances,
+                             obs_to_pred_distances = obs_to_pred_distances,
+                             obs_gp_function = as.vector(as.matrix(obs_gp_function_posterior[i,])),
+                             alpha = alpha_posterior[i],
+                             rho = rho_posterior[i])
+}
+```
+
+plot of sd of estimates
+```{r}
+data.frame(mean_lon = new_positions[,1], mean_lat = new_positions[,2], sd = apply(mean_preds, 2, sd) ) %>% ggplot(aes(x = mean_lon, y = mean_lat, color = sd, size = sd)) + geom_point() + geom_point(data = Data$positions, aes(x = mean_lon, y = mean_lat, size = 1), color = "red", show.legend = FALSE)
+```
+
+```{r}
+ggmap(get_map(location = as.data.frame(new_positions), zoom = 12))+ geom_point( data = as.data.frame(new_positions), aes(x =x1, y = x2 , color = apply(mean_preds,2,sd)),size = apply(mean_preds,2,sd)) + geom_point( data = Data$positions, aes(x =mean_lon, y = mean_lat ), color = "red")  +  guides(color = guide_legend(title = "sd"))
+ggsave("Estero Bay grid plot.png")
+```
+
+
+```{r}
+m <- leaflet() %>%
+  addTiles() %>%  # Add default OpenStreetMap map tiles
+  addCircleMarkers(lng=Data$positions$mean_lon, lat=Data$positions$mean_lat, color = "red", radius = 0.5) %>%  # Add default OpenStreetMap map tiles
+  addCircleMarkers(lng=new_positions[,1], lat=new_positions[,2], radius = 4*apply(mean_preds,2,sd))
+m
+```
+
+Prediction at additional oyster sites
+```{r}
+hey = cz325_GRMAPandEBAPoysters[ cz325_GRMAPandEBAPoysters$METADATA == "oysters_estero_2021","geometry"]
+#get centroids
+oyster_positions = as.data.frame(st_coordinates(st_centroid(hey$geometry)))
+names(oyster_positions) = c("lon","lat")
+
+obs_to_pred_distances = my_calc_point_distances(Data$positions, oyster_positions)
+pred_distances =  my_calc_point_distances(oyster_positions)
+oyster_mean_preds <- matrix(NA, nrow = 100, ncol = NROW(oyster_positions))
+for(i in 1:NROW(oyster_mean_preds)){
+  #cat('Processing posterior draw', i, 'of 5...\n')
+  oyster_mean_preds[i,] <- predict_mean(as.numeric(global_mean_posterior[i,]), obs_distances = obs_distances,
+                             pred_distances = pred_distances,
+                             obs_to_pred_distances = obs_to_pred_distances,
+                             obs_gp_function = as.vector(as.matrix(obs_gp_function_posterior[i,])),
+                             alpha = alpha_posterior[i],
+                             rho = rho_posterior[i])
+}
+
+```
+
+```{r}
+ggmap(get_map(location = as.data.frame(oyster_positions), zoom = 12))+ geom_point( data = as.data.frame(oyster_positions), aes(x =lon, y = lat , color = apply(oyster_mean_preds,2,sd)),size = apply(oyster_mean_preds,2,sd)) + geom_point( data = Data$positions, aes(x =mean_lon, y = mean_lat ), color = "red")  +  guides(color = guide_legend(title = "sd"))
+```
+```{r}
+ggsave("OysterMap.png")
+```
+Leaflet version
+```{r}
+mO <- leaflet() %>%
+  addTiles() %>%  # Add default OpenStreetMap map tiles
+  addCircleMarkers(lng=oyster_positions$lon, lat=oyster_positions$lat, radius = 4*apply(oyster_mean_preds,2,sd))  %>%
+  addCircleMarkers(lng=Data$positions$mean_lon, lat=Data$positions$mean_lat, color = "red", radius = 0.5)
+mO
+```
+
+
+```{r}
+plot(density(apply(mean_preds,2,sd)))
+```
+
+
+
+Convert to sample sizes for given sd
+
+```{r}
+fit = loess(sample_size ~ sd, sd_by_sample_size)
+
+```
+
+Effective sample sizes: for each predicted sd, compute the effective sample sizes
+```{r}
+n_hat = as.numeric(predict(fit, newdata = data.frame(sd = apply(mean_preds, 2, sd)))) 
+data.frame(mean_lon = new_positions[,1], mean_lat = new_positions[,2], n_hat ) %>% ggplot(aes(x = mean_lon, y = mean_lat, color = n_hat, size = n_hat)) + geom_point() + geom_point(data = Data$positions, aes(x = mean_lon, y = mean_lat, size = 1), color = "red")
+```
+```{r}
+ggmap(get_map(location = as.data.frame(new_positions), zoom = 12))+ geom_point( data = as.data.frame(new_positions), aes(x =x1, y = x2 , color = n_hat),size = 0.002*n_hat) + geom_point( data = Data$positions, aes(x =mean_lon, y = mean_lat ), color = "red")  +  guides(color = guide_legend(title = "effective sample sizes"))
+```
+
+```{r}
+m1 <- leaflet() %>%
+  addTiles() %>%  # Add default OpenStreetMap map tiles
+  addCircleMarkers(lng=Data$positions$mean_lon, lat=Data$positions$mean_lat, color = "red", radius = 0.005*(Estero_Bay_Data %>% count(UniversalReefID))$n, label = (Estero_Bay_Data %>% count(UniversalReefID))$n) %>%  # Add default OpenStreetMap map tiles
+  addCircleMarkers(lng=new_positions$x1, lat=new_positions$x2, radius = 0.005*n_hat, label = round(n_hat))
+m1
+```
+
+
+
+
+
+
+
+
+
+
+
+
+Proportional inclusion probabilities
+Do sd of average size:
+nonUniform sampling using GRTS
+# adding prediction uncertainty to sampling
+```{r}
+require(spsurvey) 
+oyster.positions.sd.sf =st_as_sf(data.frame(oyster_positions, sd = apply(oyster_mean_preds,2,sd), var  = apply(oyster_mean_preds,2,var)), coords = c("lon","lat"), crs =  st_crs("WGS84"))
+
+GRTS_nonuniform_sampling_results = data.frame() 
+for( sample_size in 2:50)
+  {
+  for( iterations in 1:100){
+    
+    tmp_new_positions = as.data.frame(st_coordinates(grts(oyster.positions.sd.sf,n_base = sample_size, projcrs_check = FALSE, aux_var = "var")$sites_base))
+    
+    #tmp_new_positions = runif_in_polygon(n = sample_size, vertices = as.matrix(Data$positions[chull(Data$positions),]))
+obs_to_pred_distances = my_calc_point_distances(Data$positions, tmp_new_positions)
+pred_distances =  my_calc_point_distances(tmp_new_positions)
+tmp_mean_preds <- matrix(NA, nrow = 100, ncol = NROW(tmp_new_positions))
+for(i in 1:NROW(tmp_mean_preds)){
+  #cat('Processing posterior draw', i, 'of 5...\n')
+  tmp_mean_preds[i,] <- predict_mean(as.numeric(global_mean_posterior[i,]), obs_distances = obs_distances,
+                             pred_distances = pred_distances,
+                             obs_to_pred_distances = obs_to_pred_distances,
+                             obs_gp_function = as.vector(as.matrix(obs_gp_function_posterior[i,])),
+                             alpha = alpha_posterior[i],
+                             rho = rho_posterior[i])
+       }
+  GRTS_nonuniform_sampling_results = rbind(GRTS_nonuniform_sampling_results, data.frame(sample_size = sample_size, sd = sd(apply(tmp_mean_preds,1,mean))))
+  }
+}
+
+```
+
+```{r}
+GRTS_nonuniform_sampling_results %>% ggplot(aes(x = sample_size, y = sd)) + geom_jitter(width = 0.1, alpha = 0.2)  + geom_smooth() + ggtitle("Sample inclusion probability proportional to estimation variance")
+ggsave("sd_by_spatial_sampl.png", height = 5)
+```
+Incorporating Salinity as a covariate
+
+```{r}
+cz325_t3_salinity = read.csv("cz325_t3_salinity.csv")
+cz325_t3_salinity %>% filter( ManagedAreaName == "Estero Bay Aquatic Preserve") -> EsteroBay_cz325_t3_salinity
+```
+
+
+```{r}
+EsteroBay_cz325_t3_salinity %>% dplyr::select(OriginalLongitude,OriginalLatitude) -> salinity_locations
+EsteroBay_cz325_t3_salinity %>% dplyr::select(OriginalLongitude,OriginalLatitude, ResultValue ) -> salinity_values
+```
+
+For each point in original data find closest position and corresponding salinity
+```{r}
+orig_to_salinity_distances = my_calc_point_distances(Data$positions, salinity_locations)
+original_salinity_values = salinity_values$ResultValue[apply(orig_to_salinity_distances,1,which.min)]
+
+oyster_to_salinity_distances = my_calc_point_distances(oyster_positions, salinity_locations)
+oyster_salinity_values = salinity_values$ResultValue[apply(oyster_to_salinity_distances,1,which.min)]
+```
+
+Note that the correlation is pretty weak and the prediction is not apt to work well.
+Correlation between average shell height and salinity
+```{r}
+plot(original_salinity_values, (Estero_Bay_Data%>% group_by(UniversalReefID) %>% summarize(m = mean(ShellHeight_mm)))$m)
+```
+
+
+
+Need stan code to use covariate
+Fit the Baysian model for
+Mean shell heights that vary by space; salinity is a covariate for each site
+Total execution time: 609.2 seconds
+```{r}
+
+Data = list( N =  nrow(Estero_Bay_Data)
+             ,  y = Estero_Bay_Data$ShellHeight_mm
+             , x = original_salinity_values # 
+             , G = max(Estero_Bay_Data$group)
+             , group = Estero_Bay_Data$group
+             , positions = (Estero_Bay_Data %>% dplyr::select(mean_lon, mean_lat, group) %>% distinct() %>% arrange(group))[,c("mean_lon","mean_lat")]
+             )
+              
+ 
+spatial_RE.mod <- cmdstan_model("spatial_RE.stan") # allows a covariate on the site mean
+
+ spatial_salinity_RE.EsteroBay.Shell_Height =  spatial_RE.mod$sample(
+    data = Data,
+    seed = 1111, 
+    chains = 4, # 8
+    parallel_chains = 4, # 8
+    refresh = 1000,
+    iter_warmup = 5000, 
+    iter_sampling = 5000,
+    thin =  1
+    #, adapt_delta = 0.99
+  )
+```
+Standard Deviation of posterior distribution of mean shell_height_mm estimate per site as a function of sample size
+```{r}
+sd_by_sample_size_covariate = data.frame(sample_size = (Estero_Bay_Data %>% group_by(UniversalReefID) %>% summarize( n = n()))$n, sd = spatial_mean_RE.EsteroBay.Shell_Height$summary("site_mean")$sd, sd_w_covariate = spatial_salinity_RE.EsteroBay.Shell_Height$summary("site_mean")$sd)
+```
+
+```{r}
+sd_by_sample_size_covariate %>% ggplot(aes(x = sample_size, y = sd)) + geom_point()+ geom_smooth() + ggtitle("Estero Bay Shell Height")
+```
+
+predict on the oyster positions
+```{r}
+#Prediction: draw from the relevant posterior distributions
+
+source("SpatialPredictionUtilities.R")
+alpha_covariate_posterior = spatial_salinity_RE.EsteroBay.Shell_Height$draws("sigma", format = "draws_matrix") # 4 chains 5000 draws after 5000 warmup
+rho_covariate_posterior = spatial_salinity_RE.EsteroBay.Shell_Height$draws("length_scale", format = "draws_matrix")
+obs_gp_function_posterior = spatial_salinity_RE.EsteroBay.Shell_Height$draws("gp_function", format = "draws_matrix")
+obs_distances =  my_calc_point_distances(Data$positions)
+pred_distances =  my_calc_point_distances(oyster_positions)
+obs_to_pred_distances = my_calc_point_distances(Data$positions, oyster_positions)
+slope_posterior = spatial_salinity_RE.EsteroBay.Shell_Height$draws("slope", format = "draws_matrix")
+intercept_posterior = spatial_salinity_RE.EsteroBay.Shell_Height$draws("intercept", format = "draws_matrix")
+#global_mean_posterior = spatial_mean_RE.EsteroBay.Shell_Height$draws("global_mean", format = "draws_matrix")
+```
+
+
+```{r}
+mean_covariate_preds <- matrix(NA, nrow = 100, ncol = NROW(oyster_positions))
+for(i in 1:NROW(mean_covariate_preds)){
+  #cat('Processing posterior draw', i, 'of 5...\n')
+  global_mean_covariate_posterior = intercept_posterior[i] + slope_posterior[i] *original_salinity_values
+  mean_covariate_preds[i,] <- predict_covariate_mean(as.numeric(global_mean_covariate_posterior), obs_distances = obs_distances,
+                             pred_distances = pred_distances,
+                             obs_to_pred_distances = obs_to_pred_distances,
+                             obs_gp_function = as.vector(as.matrix(obs_gp_function_posterior[i,])),
+                             alpha = alpha_covariate_posterior[i],
+                             rho = rho_covariate_posterior[i])
+}
+```
+
+```{r}
+
+
+```
