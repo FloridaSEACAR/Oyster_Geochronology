@@ -1,6 +1,8 @@
 ---
 title: "Estero Bay Shell Height Sample Size"
 output: html_notebook
+editor_options: 
+  chunk_output_type: console
 ---
 
 CZ325 Task 3: Evaluation of sample size to assess managed-area-level trends Deliverable 3a:
@@ -27,12 +29,13 @@ rstan_options(auto_write = TRUE)
 options(mc.cores = parallel::detectCores())
 
 library(leaflet)
+library(raster)
 ```
 
 
 Look at some real data
 ```{r}
-oysterraw_2022_06_30 = readRDS("oysterraw_2022-06-30_wcoords.rds")
+oysterraw_2022_06_30 = readRDS(here::here("CZ325_Sample_Size_task_3/oysterraw_2022-06-30_wcoords.rds"))
 ```
 UniversalReefID
 
@@ -59,7 +62,7 @@ Total execution time: 3893.9/3600 = 1.08
 ```{r}
 
 Data = list( N =  nrow(Estero_Bay_Data)
-             ,  y = Estero_Bay_Data$ShellHeight_mm
+             , y = Estero_Bay_Data$ShellHeight_mm
              , x = as.numeric(Estero_Bay_Data$DaysSince) # this can be used for growth calculations
              , G = max(Estero_Bay_Data$group)
              , group = Estero_Bay_Data$group
@@ -67,7 +70,7 @@ Data = list( N =  nrow(Estero_Bay_Data)
              )
               
  
-spatial_mean_RE.mod <- cmdstan_model("spatial_mean_RE.stan")
+spatial_mean_RE.mod <- cmdstan_model(here::here("CZ325_Sample_Size_task_3/spatial_mean_RE.stan"))
 
  spatial_mean_RE.EsteroBay.Shell_Height =  spatial_mean_RE.mod$sample(
     data = Data,
@@ -122,7 +125,7 @@ new_positions = grid@coords
 
 Prediction: draw from the relevant posterior distributions
 ```{r}
-source("SpatialPredictionUtilities.R")
+source(here::here("CZ325_Sample_Size_task_3/SpatialPredictionUtilities.R"))
 alpha_posterior = spatial_mean_RE.EsteroBay.Shell_Height$draws("sigma", format = "draws_matrix") # 4 chains 5000 draws after 5000 warmup
 rho_posterior = spatial_mean_RE.EsteroBay.Shell_Height$draws("length_scale", format = "draws_matrix")
 obs_gp_function_posterior = spatial_mean_RE.EsteroBay.Shell_Height$draws("gp_function", format = "draws_matrix")

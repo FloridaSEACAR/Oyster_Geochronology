@@ -27,9 +27,9 @@ set.seed(7)
   
   
   # Read in the necessary functions
-  source('WalkerDirichletMixtureUpdateFunsFinal.R') # This also reads in the slice sampling SliceUpdateFuns.R
-  source("WalkerMasterFunctionFinal.R")
-  source("SimStudyFuncsFinal.R")
+  source(here::here("CZ325_Sampling_task_2/WalkerDirichletMixtureUpdateFunsFinal.R")) # This also reads in the slice sampling SliceUpdateFuns.R
+  source(here::here("CZ325_Sampling_task_2/WalkerMasterFunctionFinal.R"))
+  source(here::here("CZ325_Sampling_task_2/SimStudyFuncsFinal.R"))
   
   # Read in data
   # x - c14ages
