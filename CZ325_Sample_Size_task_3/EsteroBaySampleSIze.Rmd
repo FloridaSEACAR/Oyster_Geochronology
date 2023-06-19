@@ -135,7 +135,7 @@ global_mean_posterior = spatial_mean_RE.EsteroBay.Shell_Height$draws("global_mea
 
 ```{r}
 mean_preds <- matrix(NA, nrow = 100, ncol = NROW(new_positions))
-for(i in 1:NROW(gp_preds)){
+for(i in 1:NROW(mean_preds)){
   #cat('Processing posterior draw', i, 'of 5...\n')
   mean_preds[i,] <- predict_mean(as.numeric(global_mean_posterior[i,]), obs_distances = obs_distances,
                              pred_distances = pred_distances,
