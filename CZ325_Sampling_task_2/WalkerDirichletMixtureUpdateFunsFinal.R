@@ -3,7 +3,7 @@
 ######################################################
 
 # Read in the required slice updating functions
-source("SliceUpdateFunsFinal.R")
+source(here::here("CZ325_Sampling_task_2/SliceUpdateFunsFinal.R"))
 
 # The as.row function which we will use to count number of diferent clusters
 as.row <- function(x) {
