@@ -58,7 +58,7 @@ Estero_Bay_shell_height %>% dplyr::select( UniversalReefID, Latitude,Longitude) 
 left_join(Estero_Bay_shell_height,UI2LL,by = join_by(UniversalReefID)) %>% mutate(DaysSince = (SampleDate - min(SampleDate))/3600/24 ) %>% group_by(UniversalReefID) %>% mutate( group = cur_group_id()) -> Estero_Bay_Data
 ```
 
-Fit the Baysian model for
+Fit the Bayesian model for
 Mean shell heights that vary by space
 Total execution time: 3893.9/3600 = 1.08
 ```{r}
@@ -168,6 +168,10 @@ m <- leaflet() %>%
   addCircleMarkers(lng=Data$positions$mean_lon, lat=Data$positions$mean_lat, color = "red", radius = 0.5) %>%  # Add default OpenStreetMap map tiles
   addCircleMarkers(lng=new_positions[,1], lat=new_positions[,2], radius = 4*apply(mean_preds,2,sd))
 m
+```
+
+```{r}
+cz325_GRMAPandEBAPoysters = readRDS("cz325_GRMAPandEBAPoysters.rds")
 ```
 
 Prediction at additional oyster sites
