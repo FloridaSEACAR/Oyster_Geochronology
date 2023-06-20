@@ -2,14 +2,12 @@
 # Original from Tim Heaton T.Heaton@leeds.ac.uk
 # Reference email subject "Nonparametric post bomb calibration - CZ325" dated March 20, 2023
 
-
-
 ######################################################
 # Functions are called by the master Gibbs functions
 ######################################################
 
 # Read in the required slice updating functions
-source(here::here("CZ325_Sampling_task_2/SliceUpdateFunsFinal.R"))
+source("SliceUpdateFunsFinal.R")
 
 # The as.row function which we will use to count number of diferent clusters
 as.row <- function(x) {

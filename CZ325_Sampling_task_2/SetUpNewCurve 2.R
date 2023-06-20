@@ -7,6 +7,7 @@ library(rintcal)
 # so here we estimate 14C from fractions. Some of the data have 14C and fractions, so we use those fot fit a linear
 # model, then use that model to impute all missing 14C values
 # we also get the 14C standard deviations from the fitted values.
+
 Curve = read.csv("HOBS_14C_CalCurve_PredictedVals_20230524.csv")
 Combined14C_forFLCalCurve = read.csv("Combined14C_forFLCalCurve.csv")
 

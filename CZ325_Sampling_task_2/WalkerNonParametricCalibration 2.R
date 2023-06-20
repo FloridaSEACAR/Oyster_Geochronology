@@ -4,9 +4,7 @@
 # Original from Tim Heaton T.Heaton@leeds.ac.uk
 # Reference email subject "Nonparametric post bomb calibration - CZ325" dated March 20, 2023
 
-# Curve can only contain fraction maderns with columns
 #  "Year", "D14C", "D14Csd", "F14C", "F14Csd"
-
 WalkerNonParametricCalibration = function(Curve, Determinations){
 require(dplyr)  
 set.seed(7)
@@ -31,9 +29,9 @@ set.seed(7)
   
   
   # Read in the necessary functions
-  source(here::here("CZ325_Sampling_task_2/WalkerDirichletMixtureUpdateFunsFinal.R")) # This also reads in the slice sampling SliceUpdateFuns.R
-  source(here::here("CZ325_Sampling_task_2/WalkerMasterFunctionFinal.R"))
-  source(here::here("CZ325_Sampling_task_2/SimStudyFuncsFinal.R"))
+  source('WalkerDirichletMixtureUpdateFunsFinal.R') # This also reads in the slice sampling SliceUpdateFuns.R
+  source("WalkerMasterFunctionFinal.R")
+  source("SimStudyFuncsFinal.R")
   
   # Read in data
   # x - c14ages
