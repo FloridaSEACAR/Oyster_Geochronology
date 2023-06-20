@@ -13,13 +13,13 @@ library(oxcAAR)
 library(rintcal)
 setOxcalExecutablePath("/Users/johnhandley/Documents/PaleontologyResearch/Oysters/HOBS/Contract work/OxCal/bin/OxCalMac")
 ```
-"Utilities.R" is part of  AGREEMENT NO. CZ325, Deliverable 1a (Modeling approach to age and time-averaging estimation
+"Utilities.R" is part of AGREEMENT NO. CZ325, Deliverable 1a (Modeling approach to age and time-averaging estimation
 ```{r}
 source("Utilities.R") # 
 ```
 
 
-Helper function to creat calendar dates from fractions madern
+Helper function to creat calendar dates from fractions modern
 ```{r}
 source("write_oxcal_sum_script.R")
 source("SetUpNewCurve.R") # sets up globals curvename, curverpath

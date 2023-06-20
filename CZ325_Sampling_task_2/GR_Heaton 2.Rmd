@@ -1,0 +1,94 @@
+---
+title: "Heaton's Method on New Data from Guana River"
+output: html_notebook
+---
+DEP AGREEMENT NO. CZ325 Deliverable 2b (Radiocarbon sample size for age and time-averaging determination)
+
+```{r}
+library(tidyverse)
+library(magrittr)
+library(reshape2)
+library(HDInterval)
+library(readxl)
+```
+
+Determinations:
+Get the original HOBS data
+```{r}
+
+HOBSGeo_Apps_202208_final.DR3 = read_xlsx("HOBSGeo_Apps_202208_final.xlsx", sheet = "DR3", skip = 31 )
+HOBSGeo_Apps_202208_final.DR3 %>% filter(Locality == "Guana River") -> GR_Old
+
+GR_Old %<>% filter(Station == 8855) %>% select(Cat_No,F14C_corr,F14C_corr_sd)
+names(GR_Old) = c("name", "F14C_corr","F14C_corr_sd")
+```
+
+Get the new samples
+
+```{r}
+Durham_GAS_April24_2023 = read_xlsx("Durham_GAS 14C results_April 24 2023.xlsx", skip = 1)
+Durham_GAS_April24_2023 %<>% select("Sample ID", "Modern","±...5")
+Durham_GAS_April24_2023 %<>% na.omit()
+names(Durham_GAS_April24_2023) = c("name", "F14C_corr","F14C_corr_sd")
+Durham_GAS_April24_2023 %<>% mutate(Sample_code = as.character(data.frame(strsplit(name, " "))[1,]))
+Durham_GAS_April24_2023 %>% filter(grepl("GR_R3H1S1", name)) -> GR_New
+GR_New %<>% select(name, F14C_corr,F14C_corr_sd)
+```
+
+
+Curve
+```{r}
+# Curve = read.csv("/Users/johnhandley/Documents/PaleontologyResearch/Oysters/HOBS/Contract work/Comparisons/Kowalewski_NP/Curves/bombBahamasto10000calBP.14c", sep = "\t")
+# names(Curve) = c("Year", "D14C", "D14Csd", "F14C", "F14Csd")
+Curve = read.csv("/Users/johnhandley/Documents/PaleontologyResearch/Oysters/HOBS/Contract work/Comparisons/Kowalewski_NP/Curves/HOBS_14C_CalCurve_PredictedVals_20230524.csv")
+Curve %<>% mutate(Year = year, D14C = NA, D14Csd = NA, F14C = estimate, F14Csd = esterror) %>% select(-contains(c("q", "est"))) %>% select(-year)
+```
+
+
+
+
+
+
+Let's see if we can run through some random samples with Heaton's code
+81644.536/3600/3600
+[1] 22.67904
+```{r}
+source("WalkerNonParametricCalibration.R") #DEP AGREEMENT NO. CZ325, Deliverable 1a (Modeling approach to age and time-averaging estimation)
+source("Utilities.R") #DEP AGREEMENT NO. CZ325, Deliverable 1a (Modeling approach to age and time-averaging estimation)
+GR_All  = as.data.frame(rbind(GR_Old,GR_New))
+
+GR_All_names = GR_All$name
+GR_All_NP_results = data.frame()
+set.seed(1234)
+system.time(
+for( n in seq(3,length(GR_All_names), by = 1)){ 
+     for( ii in 1:30){ 
+        random_sample = sample(GR_All_names, size = n, replace = FALSE)
+        # get the factions for these samples
+        tmp = GR_All %>% filter(name %in% random_sample)
+        NP = WalkerNonParametricCalibration(Curve = Curve, Determinations = tmp)
+        NP %<>% select(calage, NonParametric)
+        names(NP) = c("year","probability")
+        NP$year = 2020-NP$year
+        GR_All_NP_results = rbind(GR_All_NP_results, data.frame( n = n, NP_IQR = Posterior_IQR(NP), NP_95 = Posterior_IQR(NP, lo = 0.025, hi = 0.975), NP_HDI = HDI(NP), Median = Median(NP)))
+     }
+}
+)
+write_rds(GR_All_NP_results,"GR_All_NP_results.RDS")
+```
+```{r}
+GR_All_NP_results %>% select(-Median) %>% reshape2::melt("n") %>% ggplot(aes(x = n, y = value)) + geom_jitter(width = 0.2, alpha =0.5, size = 0.5) + geom_smooth(color = "orange") + facet_wrap(~variable) + ggtitle("Guana River")
+```
+
+HOBSGeo_Apps_202208_final Median sample age 2009
+```{r}
+HOBSGeo_Apps_202208_final.DR1 = read_xlsx("HOBSGeo_Apps_202208_final.xlsx", sheet = "DR1", skip = 21 )
+names(HOBSGeo_Apps_202208_final.DR1) = c("Locality",	"Station",	"Lat",	"Lon",	"IGSN",	"Depth",	"N", "Median",	"Min",	"Max","IQR_AER",	"IQR_TAV",	"IQR_CPE")
+HOBSGeo_Apps_202208_final.DR1 %>% filter(Station == 8855) %>% select(N, Median) %>% data.frame() -> old_estimates
+
+GR_All_NP_results %>% select(n,Median) %>% ggplot(aes(x = n, y = Median)) + geom_jitter(width = 0.2, alpha =0.5, size = 0.5) + geom_smooth(color = "orange") + geom_point(aes(x = old_estimates$N, y =old_estimates$Median), color = "red", size = 2) + ggtitle("Guana River")
+
+```
+
+
+
