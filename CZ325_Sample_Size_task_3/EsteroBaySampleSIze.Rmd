@@ -34,32 +34,54 @@ library(ggmap)
 library(sf)
 ```
 
-
+The goal here is to use a spatial model for oyster shell heights by reef. The model will be used to predict mean shell heights at unseen locations 
+and prediction uncertainty will be used to guide additional samples.
 Look at some real data
 ```{r}
 oysterraw_2022_06_30 = readRDS(here::here("CZ325_Sample_Size_task_3/oysterraw_2022-06-30_wcoords.rds"))
 ```
-UniversalReefID
+We use UniversalReefID as a unique identifier of a location.
 
-First, we look at shell height as a response
+First, we look at shell height as a response at single managed area, Estero Bay.
+There are multiple (many) shells per site.
 ```{r}
 oysterraw_2022_06_30 %>% dplyr::select(ShellHeight_mm, ManagedAreaName,SampleDate,ShellHeight_mm, ObsIndex, Latitude, Longitude,UniversalReefID) %>% na.omit() %>% filter(ManagedAreaName == "Estero Bay Aquatic Preserve") -> Estero_Bay_shell_height
 ```
 
-Looks like 58 sites
+Looks like 58 sites, i.e., unique UniversalReefID's
+
 ```{r}
 Estero_Bay_shell_height %>% group_by(UniversalReefID) %>% summarize( n = n())
 ```
-use average UniversalReefID lat lon for position of UniversalReefID
+
+There are several lat/lons associated with a single 
+use average UniversalReefID lat lon for the position of UniversalReefID
+so to get a single lat lon for a single UniversalReefID, we average the lat lons
+
 This data set has multiple shell height observations per UniversalReefID site
 ShellHeight_mm ManagedAreaName             SampleDate          ObsIndex Latitude Longitude UniversalReefID mean_lat mean_lon DaysSince group
+
+We also compute a "DaysSince" field. This represents the number of days since the olded shell was sampled. It can be used to 
+model growth. It is not used in this analysis.
+
 ```{r}
 Estero_Bay_shell_height %>% dplyr::select( UniversalReefID, Latitude,Longitude) %>%  group_by(UniversalReefID) %>% summarize( mean_lat = mean(Latitude), mean_lon = mean(Longitude) ) %>% distinct() -> UI2LL
 left_join(Estero_Bay_shell_height,UI2LL,by = join_by(UniversalReefID)) %>% mutate(DaysSince = (SampleDate - min(SampleDate))/3600/24 ) %>% group_by(UniversalReefID) %>% mutate( group = cur_group_id()) -> Estero_Bay_Data
 ```
 
+We use stan for Bayesian model fitting. Stan is a separate language for model description. There are several packages
+that can read and compile stan code. cmdstanr is the latest and greatest. rstan is another one. There is also pystan if Python is your language
+of choice.
+
+This takes about an hour and dumps out a lot of status on the way.
+
+The model is descibed in the report but it basically models the covariance of shell heights as a function
+of distance. Sites that are close together have a higher covariance than things far apart. Covariance
+descreases exponentially. 
+
 Fit the Bayesian model for
-Mean shell heights that vary by space
+mean shell heights that vary by space
+
 Total execution time: 3893.9/3600 = 1.08
 ```{r}
 
@@ -87,7 +109,7 @@ spatial_mean_RE.mod <- cmdstan_model(here::here("CZ325_Sample_Size_task_3/spatia
   )
 ```
 
-Standard Deviation of posterior distribution of mean shell_height_mm estimate per site as a function of sample size
+Look to see how well the model fits the data by plotting the average mean height with the predicted mean height.
 ```{r}
 data.frame(empirical_mean = (Estero_Bay_Data %>% group_by(UniversalReefID) %>% summarize( empirical_mean = mean(ShellHeight_mm)))$empirical_mean, fitted_mean = spatial_mean_RE.EsteroBay.Shell_Height$summary("site_mean")$mean) %>% 
   ggplot(aes(x = empirical_mean, y = fitted_mean)) + geom_point() + geom_smooth() + ggtitle("Estero Bay")
@@ -99,7 +121,10 @@ Standard Deviation of posterior distribution of mean shell_height_mm estimate pe
 sd_by_sample_size = data.frame(sample_size = (Estero_Bay_Data %>% group_by(UniversalReefID) %>% summarize( n = n()))$n, sd = spatial_mean_RE.EsteroBay.Shell_Height$summary("site_mean")$sd)
 ```
 
-
+In the report, we explain how the plot on the left is showing uncertainty as a function of sample size by
+simply using the classical standard deviation of the average and the plot on the right shows the standard deviations
+of the posterior predictions, which uses spatial information. The key insight is that the plot on the right is smoother
+and that selecting sample size from a spatially informed model is apt to provide a better estimate of uncertainty.
 ```{r}
 rbind(Estero_Bay_Data %>% group_by(UniversalReefID) %>% summarize( sample_size = n(), sd = sd(ShellHeight_mm)/sqrt(n())) %>% dplyr::select(sample_size, sd) %>% mutate(method = "empirical"),
 sd_by_sample_size %>% mutate(method = "spatial model")) %>% ggplot(aes(x = sample_size, y = sd, color = method)) + geom_point() + geom_smooth( show.legend = FALSE) + facet_wrap(~method) + theme(legend.position="none")
@@ -117,15 +142,26 @@ Estero_Bay_Data %>% ggplot(aes(x = ShellHeight_mm)) + geom_histogram()
 ```
 
 
+Regular grid inside the convex hull of the original points.
+Using functions from R-package sp, we get a grid of n = 256 points within the convex hull
+of our existing 58 sites. We use this to predict from our existing points to points
+in the grid. 
 
 
-Regular grid inside the convex hull of the original points
 ```{r}
 grid = spsample(Polygon(Data$positions[chull(Data$positions),]), n = 256, type = "regular")
 new_positions = grid@coords
 ```
 
-Prediction: draw from the relevant posterior distributions
+Prediction: draw from the relevant posterior distributions.
+cmdstanr has a method "draws" to extract the posterior samples of each estimated parameter.
+The model has alpha, rho, and the gp_function, which is the spatial random effects variable.
+The accompanying report shows the math and the intuition, but essentially it is the variable
+that is representing the spatial dependence.
+
+We also use a number of helper functions to find the distances between all the new points and the old ones
+and between all the new points. All these are fed into a prediction function
+
 ```{r}
 source(here::here("CZ325_Sample_Size_task_3/SpatialPredictionUtilities.R"))
 alpha_posterior = spatial_mean_RE.EsteroBay.Shell_Height$draws("sigma", format = "draws_matrix") # 4 chains 5000 draws after 5000 warmup
@@ -137,6 +173,10 @@ obs_to_pred_distances = my_calc_point_distances(Data$positions, new_positions)
 global_mean_posterior = spatial_mean_RE.EsteroBay.Shell_Height$draws("global_mean", format = "draws_matrix")
 ```
 
+
+For each draw on all the posteriors of all the parameters, make a prediction of the mean shell height on all
+the new points. We do this 100 times, so essentially simulating the uncertainty associated with the predictions.
+At the end of this, we have 100 predictions of the mean shell heights at all the new positions.
 
 ```{r}
 mean_preds <- matrix(NA, nrow = 100, ncol = NROW(new_positions))
@@ -151,10 +191,13 @@ for(i in 1:NROW(mean_preds)){
 }
 ```
 
-plot of sd of estimates
+Plot of sd of estimates. Without any of the map info, you can see how the uncertainty in the prediction
+basically is larger the farther you get away from the know points.
 ```{r}
 data.frame(mean_lon = new_positions[,1], mean_lat = new_positions[,2], sd = apply(mean_preds, 2, sd) ) %>% ggplot(aes(x = mean_lon, y = mean_lat, color = sd, size = sd)) + geom_point() + geom_point(data = Data$positions, aes(x = mean_lon, y = mean_lat, size = 1), color = "red", show.legend = FALSE)
 ```
+
+ggmap by default uses Google maps. To use this, you need to register to get a key and then use that for your plotting session.
 
 ```{r}
 ggmap(get_map(location = as.data.frame(new_positions), zoom = 12))+ geom_point( data = as.data.frame(new_positions), aes(x =x1, y = x2 , color = apply(mean_preds,2,sd)),size = apply(mean_preds,2,sd)) + geom_point( data = Data$positions, aes(x =mean_lon, y = mean_lat ), color = "red")  +  guides(color = guide_legend(title = "sd"))
@@ -174,7 +217,18 @@ m
 cz325_GRMAPandEBAPoysters = readRDS("cz325_GRMAPandEBAPoysters.rds")
 ```
 
-Prediction at additional oyster sites
+Prediction at additional oyster sites -- look at the ones in the Estero Bay managed area.
+We also get the "geometry" which is actually a polygon outlining the reef.
+We use a function st_centroid from the R-package 'st' to get the centroid of each polygon.
+This is because our model is point based and we are looking for an estimate at a location.
+Then we do everything like we did with the grid: get the posteriors of all the paramaters in the model,
+get all the distances between the new oyster positions and the distances between all the new positions
+and the old ones.
+
+The we draw on the posterior distributions, use those and the distances to predict at all the new oyster locations.
+We do this 100 times and when it is done, we have 100 estimates of the mean shell height at all the new oyster positions.
+The standard deviation of the mean oyster predictions represents our measure in uncertainty.
+
 ```{r}
 hey = cz325_GRMAPandEBAPoysters[ cz325_GRMAPandEBAPoysters$METADATA == "oysters_estero_2021","geometry"]
 #get centroids
@@ -195,7 +249,7 @@ for(i in 1:NROW(oyster_mean_preds)){
 }
 
 ```
-
+As with the grid, you can see that prediction uncertainty increases as one moves away from existing sample points were the model was fitted.
 ```{r}
 ggmap(get_map(location = as.data.frame(oyster_positions), zoom = 12))+ geom_point( data = as.data.frame(oyster_positions), aes(x =lon, y = lat , color = apply(oyster_mean_preds,2,sd)),size = apply(oyster_mean_preds,2,sd)) + geom_point( data = Data$positions, aes(x =mean_lon, y = mean_lat ), color = "red")  +  guides(color = guide_legend(title = "sd"))
 ```
@@ -218,14 +272,21 @@ plot(density(apply(mean_preds,2,sd)))
 
 
 
-Convert to sample sizes for given sd
+
+This another way to view the uncertainty spatially. We have an emprirical relationship 
+between the standard deviation at one of the sample points and the number of samples taken there.
+
+We use a semi-parametric model to relate standard deviation to sample size. We then can use this to predict the sample size 
+at any point with the prediction uncertainty. 
+
 
 ```{r}
 fit = loess(sample_size ~ sd, sd_by_sample_size)
 
 ```
 
-Effective sample sizes: for each predicted sd, compute the effective sample sizes
+
+Effective sample sizes: for each predicted sd, compute the sample size that would have been required to achieve it.
 ```{r}
 n_hat = as.numeric(predict(fit, newdata = data.frame(sd = apply(mean_preds, 2, sd)))) 
 data.frame(mean_lon = new_positions[,1], mean_lat = new_positions[,2], n_hat ) %>% ggplot(aes(x = mean_lon, y = mean_lat, color = n_hat, size = n_hat)) + geom_point() + geom_point(data = Data$positions, aes(x = mean_lon, y = mean_lat, size = 1), color = "red")
@@ -244,7 +305,31 @@ m1
 ```
 
 
+Generalized random tessellation sampling (GRTS) is a defacto standard in envirommental sampling.
+There are numerous refences to the method (we cite some in the report). Here we use GRTS which
+is avaliable in the R-package spsurvey. The way we use it here, is to generate a design with 
+a certain number of sample points. The function grts() does all the work. You need to give it the
+possible sampling locations. It has an algorithm that tries to find a spatially representative 
+sample of sites. But the addition here is to also use it to prefer points where our model
+is uncertain. This informs the model to select points that represent locations where 
+we are uncertain and need more information. 
 
+The variable we use for preference, that is the probability of inclusion in the sample, is proportional to the variance
+of the predictions
+
+
+Proportional inclusion probabilities
+Do sd of average size:
+nonUniform sampling using GRTS
+
+
+To understand how this effects sample size, we do a simulation at various sample sizes, say from 2 to 50.
+grts() generates random samples, so we do this a number (100) times. For each sample_size, we use the variance of the predictions
+of all the possible oyster positions (that is, positions and variances) in the grts() function, use it to sample sample_size positions, 
+predict the mean shell height at those positions (100 times as before), compute the of all the predictions. The idea here is that 
+the goal might be to estimate the mean shell height for the entire managed area. So we simply use the standard deviations of all the
+esimates of the mean shell height. For each sample_size draw from grts(), we get a standard deviation of mean shell height. 
+One would expect that the standard deviations of the standard deviations would decrease as sample_size increase.
 
 
 
@@ -287,25 +372,35 @@ for(i in 1:NROW(tmp_mean_preds)){
 }
 
 ```
+In this plot, we see how overall mean shell height prediction improves as sample size increases using a combination
+of grts()  and site selection using prediction uncertainty.
 
 ```{r}
 GRTS_nonuniform_sampling_results %>% ggplot(aes(x = sample_size, y = sd)) + geom_jitter(width = 0.1, alpha = 0.2)  + geom_smooth() + ggtitle("Sample inclusion probability proportional to estimation variance")
 ggsave("sd_by_spatial_sampl.png", height = 5)
 ```
-Incorporating Salinity as a covariate
+
+The basic spatial model can incorporate covariates to (potentially) improve prediction and if so, reduce sample sizes.
+That is, if one can accurately predict at unseen sites, there is no need to sample there. Or sample less frquently.
+
+We show an example, incorporating Salinity as a covariate. Salinity doesn't really predict shell height very well so 
+we go though the analysis formally to show how it's done.
+
+First, read in some salinity data and filter out only those that correspond to our sites.
 
 ```{r}
 cz325_t3_salinity = read.csv(here::here("CZ325_Sample_Size_task_3/cz325_t3_salinity.csv"))
 cz325_t3_salinity %>% filter( ManagedAreaName == "Estero Bay Aquatic Preserve") -> EsteroBay_cz325_t3_salinity
 ```
 
-
+We just need the locations and values.
 ```{r}
 EsteroBay_cz325_t3_salinity %>% dplyr::select(OriginalLongitude,OriginalLatitude) -> salinity_locations
 EsteroBay_cz325_t3_salinity %>% dplyr::select(OriginalLongitude,OriginalLatitude, ResultValue ) -> salinity_values
 ```
 
-For each point in original data find closest position and corresponding salinity
+For each point in original data find closest position and corresponding salinity.
+We use a distance calculation function (in our 'SpatialPredictionUtilities.R' file) and do a nearest neightbors calculation.
 ```{r}
 orig_to_salinity_distances = my_calc_point_distances(Data$positions, salinity_locations)
 original_salinity_values = salinity_values$ResultValue[apply(orig_to_salinity_distances,1,which.min)]
@@ -320,10 +415,12 @@ Correlation between average shell height and salinity
 plot(original_salinity_values, (Estero_Bay_Data%>% group_by(UniversalReefID) %>% summarize(m = mean(ShellHeight_mm)))$m)
 ```
 
+We have a version of the stan code that can incorporate a covariate.
+It relates mean shell height to the salinity at the site.
 
 
 Need stan code to use covariate
-Fit the Baysian model for
+Fit the Bayesian model for
 Mean shell heights that vary by space; salinity is a covariate for each site
 Total execution time: 609.2 seconds
 ```{r}
@@ -351,6 +448,7 @@ spatial_salinity_RE.EsteroBay.Shell_Height =  spatial_RE.mod$sample(
   #, adapt_delta = 0.99
 )
 ```
+Just as before, calculate the standard deviation of posterior distribution of mean shell_height_mm estimate per site as a function of sample size
 Standard Deviation of posterior distribution of mean shell_height_mm estimate per site as a function of sample size
 ```{r}
 sd_by_sample_size_covariate = data.frame(sample_size = (Estero_Bay_Data %>% group_by(UniversalReefID) %>% summarize( n = n()))$n, sd = spatial_mean_RE.EsteroBay.Shell_Height$summary("site_mean")$sd, sd_w_covariate = spatial_salinity_RE.EsteroBay.Shell_Height$summary("site_mean")$sd)
@@ -360,7 +458,8 @@ sd_by_sample_size_covariate = data.frame(sample_size = (Estero_Bay_Data %>% grou
 sd_by_sample_size_covariate %>% ggplot(aes(x = sample_size, y = sd)) + geom_point()+ geom_smooth() + ggtitle("Estero Bay Shell Height")
 ```
 
-predict on the oyster positions
+
+As before, need posterior distributions and distances between new points and between new points and old ones.
 ```{r}
 #Prediction: draw from the relevant posterior distributions
 
@@ -376,6 +475,9 @@ intercept_posterior = spatial_salinity_RE.EsteroBay.Shell_Height$draws("intercep
 #global_mean_posterior = spatial_mean_RE.EsteroBay.Shell_Height$draws("global_mean", format = "draws_matrix")
 ```
 
+And now do all the predictions as before. Take draws on the posteriors of the parameters, feed in the distances and predict
+100 times for each new position. We don't show the results because strictly speaking, the relationship between salinity and 
+mean shell height is poor (R^2 of 0.005)
 
 ```{r}
 mean_covariate_preds <- matrix(NA, nrow = 100, ncol = NROW(oyster_positions))
@@ -391,7 +493,4 @@ for(i in 1:NROW(mean_covariate_preds)){
 }
 ```
 
-```{r}
 
-
-```
