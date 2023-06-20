@@ -30,6 +30,8 @@ options(mc.cores = parallel::detectCores())
 
 library(leaflet)
 library(raster)
+library(ggmap)
+library(sf)
 ```
 
 
@@ -224,6 +226,7 @@ Effective sample sizes: for each predicted sd, compute the effective sample size
 n_hat = as.numeric(predict(fit, newdata = data.frame(sd = apply(mean_preds, 2, sd)))) 
 data.frame(mean_lon = new_positions[,1], mean_lat = new_positions[,2], n_hat ) %>% ggplot(aes(x = mean_lon, y = mean_lat, color = n_hat, size = n_hat)) + geom_point() + geom_point(data = Data$positions, aes(x = mean_lon, y = mean_lat, size = 1), color = "red")
 ```
+
 ```{r}
 ggmap(get_map(location = as.data.frame(new_positions), zoom = 12))+ geom_point( data = as.data.frame(new_positions), aes(x =x1, y = x2 , color = n_hat),size = 0.002*n_hat) + geom_point( data = Data$positions, aes(x =mean_lon, y = mean_lat ), color = "red")  +  guides(color = guide_legend(title = "effective sample sizes"))
 ```
@@ -232,7 +235,7 @@ ggmap(get_map(location = as.data.frame(new_positions), zoom = 12))+ geom_point( 
 m1 <- leaflet() %>%
   addTiles() %>%  # Add default OpenStreetMap map tiles
   addCircleMarkers(lng=Data$positions$mean_lon, lat=Data$positions$mean_lat, color = "red", radius = 0.005*(Estero_Bay_Data %>% count(UniversalReefID))$n, label = (Estero_Bay_Data %>% count(UniversalReefID))$n) %>%  # Add default OpenStreetMap map tiles
-  addCircleMarkers(lng=new_positions$x1, lat=new_positions$x2, radius = 0.005*n_hat, label = round(n_hat))
+  addCircleMarkers(lng=new_positions[,1], lat=new_positions[,2], radius = 0.005*n_hat, label = round(n_hat))
 m1
 ```
 
@@ -256,8 +259,8 @@ require(spsurvey)
 oyster.positions.sd.sf =st_as_sf(data.frame(oyster_positions, sd = apply(oyster_mean_preds,2,sd), var  = apply(oyster_mean_preds,2,var)), coords = c("lon","lat"), crs =  st_crs("WGS84"))
 
 GRTS_nonuniform_sampling_results = data.frame() 
-for( sample_size in 2:50)
-  {
+for( sample_size in 2:50){
+  
   for( iterations in 1:100){
     
     tmp_new_positions = as.data.frame(st_coordinates(grts(oyster.positions.sd.sf,n_base = sample_size, projcrs_check = FALSE, aux_var = "var")$sites_base))
@@ -288,7 +291,7 @@ ggsave("sd_by_spatial_sampl.png", height = 5)
 Incorporating Salinity as a covariate
 
 ```{r}
-cz325_t3_salinity = read.csv("cz325_t3_salinity.csv")
+cz325_t3_salinity = read.csv(here::here("CZ325_Sample_Size_task_3/cz325_t3_salinity.csv"))
 cz325_t3_salinity %>% filter( ManagedAreaName == "Estero Bay Aquatic Preserve") -> EsteroBay_cz325_t3_salinity
 ```
 
@@ -322,7 +325,7 @@ Total execution time: 609.2 seconds
 ```{r}
 
 Data = list( N =  nrow(Estero_Bay_Data)
-             ,  y = Estero_Bay_Data$ShellHeight_mm
+             , y = Estero_Bay_Data$ShellHeight_mm
              , x = original_salinity_values # 
              , G = max(Estero_Bay_Data$group)
              , group = Estero_Bay_Data$group
@@ -330,19 +333,19 @@ Data = list( N =  nrow(Estero_Bay_Data)
              )
               
  
-spatial_RE.mod <- cmdstan_model("spatial_RE.stan") # allows a covariate on the site mean
+spatial_RE.mod <- cmdstan_model(here::here("CZ325_Sample_Size_task_3/spatial_RE.stan")) # allows a covariate on the site mean
 
- spatial_salinity_RE.EsteroBay.Shell_Height =  spatial_RE.mod$sample(
-    data = Data,
-    seed = 1111, 
-    chains = 4, # 8
-    parallel_chains = 4, # 8
-    refresh = 1000,
-    iter_warmup = 5000, 
-    iter_sampling = 5000,
-    thin =  1
-    #, adapt_delta = 0.99
-  )
+spatial_salinity_RE.EsteroBay.Shell_Height =  spatial_RE.mod$sample(
+  data = Data,
+  seed = 1111, 
+  chains = 4, # 8
+  parallel_chains = 4, # 8
+  refresh = 1000,
+  iter_warmup = 5000, 
+  iter_sampling = 5000,
+  thin =  1
+  #, adapt_delta = 0.99
+)
 ```
 Standard Deviation of posterior distribution of mean shell_height_mm estimate per site as a function of sample size
 ```{r}
@@ -357,7 +360,7 @@ predict on the oyster positions
 ```{r}
 #Prediction: draw from the relevant posterior distributions
 
-source("SpatialPredictionUtilities.R")
+source(here::here("CZ325_Sample_Size_task_3/SpatialPredictionUtilities.R"))
 alpha_covariate_posterior = spatial_salinity_RE.EsteroBay.Shell_Height$draws("sigma", format = "draws_matrix") # 4 chains 5000 draws after 5000 warmup
 rho_covariate_posterior = spatial_salinity_RE.EsteroBay.Shell_Height$draws("length_scale", format = "draws_matrix")
 obs_gp_function_posterior = spatial_salinity_RE.EsteroBay.Shell_Height$draws("gp_function", format = "draws_matrix")
