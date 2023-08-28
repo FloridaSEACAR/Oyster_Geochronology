@@ -25,12 +25,32 @@ TAV = function(posterior_distribution){
   return( p)
 }
 
+# doesn't assume the distributions are subsetted by sample
+# TAV2 = function(posterior_distribution, samp_var = "igsn", year_var = "year", spec_var = "name", prob_var = "probability"){
+#   require(data.table)
+#   p = posterior_distribution[, .(probability = sum(eval(as.name(prob_var)))/length(unique(eval(as.name(spec_var))))), by = list(eval(as.name(samp_var)), eval(as.name(year_var)))]
+#   return( p)
+# }
+TAV2 = function(posterior_distribution, samp_var = "igsn", year_var = "year", spec_var = "name", prob_var = "probability"){
+  require(data.table)
+  setDT(posterior_distribution)
+  
+  samp_var <- as.name(samp_var)
+  year_var <- as.name(year_var)
+  spec_var <- as.name(spec_var)
+  prob_var <- as.name(prob_var)
+  
+  p = posterior_distribution[, .(probability = sum(eval(prob_var))/length(unique(eval(spec_var)))), by = list(eval(samp_var), eval(year_var))]
+  setnames(p, c("samp_var", "year_var"), c(as.character(samp_var), as.character(year_var)))
+  
+  return( p)
+}
 
 Posterior_IQR = function(posterior_distribution, lo = 0.25, hi = 0.75)
 {
   cummulative = cumsum(posterior_distribution$probability)
   year = posterior_distribution$year
-  return(year[max(which(cummulative <= hi))] - year[max(which(cummulative <= lo))])
+  return(year[max(which(cummulative <= lo))] - year[max(which(cummulative <= hi))])
 }
 
 # 95% CR on TAV
@@ -50,7 +70,7 @@ CR_95_TAV = function(posterior_distribution){
 CPE = function(posterior_distribution){
   
   
-  tmp = TAV(posterior_distribution)
+  tmp = TAV2(posterior_distribution)
   tav_iqr = Posterior_IQR(tmp)
   
   specimen_sample = unique(posterior_distribution$name)
