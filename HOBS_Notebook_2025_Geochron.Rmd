@@ -1,0 +1,2796 @@
+---
+title: "2025 HOBS Body Size Analyses Notebook"
+output: html_notebook
+---
+
+The first step is to refine and finalize the ages I will use. To do that, I am beginning with a concept started with the variable DeadC explorations for Apalachicola Bay and in the "DeadC_study.R" script I wrote for discussions with Jaleigh.
+
+```{r setup}
+library(tidyverse)
+library(data.table)
+library(plotly)
+library(openxlsx)
+library(patchwork)
+library(rintcal)
+library(brms)
+
+#Combined and matched atmospheric and marine radiocarbon curves
+# curves <- fread("C:/Users/steph/Dropbox/Steve_CurrentProjects/HOBS/JQP_GR/Marine_v_Atmospheric_f14c.csv")
+
+#New curve with Marine20 values for years <= 1950
+ncm20_dat <- fread(here::here("Summer2023/NewCurve_wMarine20_vals.csv")) #Where are the original Marine20 data?
+ncm20_dat[, `:=` (f14c_calc = rice::C14toF14C(`14Cage`, er = `14Cage_sd`)[,1],
+                  f14c_calc_sd = rice::C14toF14C(`14Cage`, er = `14Cage_sd`)[,2])]
+m20 <- ncm20_dat[!is.na(f14c_calc), .(year = Year_ce, f14c = f14c_calc, f14c_sd = f14c_calc_sd, d14c = d14C, d14c_sd = d14C_sd)]
+
+#Load and prep original Hua atmospheric curve
+hua_22 <- read.xlsx(here::here("CalCurve/Hua_etal_2022_supp/s0033822221000953sup002.xlsx"), sheet = "NH zone 2", na.strings = c("", "NA", "NULL"), startRow = 5)
+setDT(hua_22)
+
+#Use weighted average formulas to coarsen to an annual time series
+hua_22[, Year2 := floor(Year)]
+
+hua_22_yr <- lapply(unique(hua_22$Year2), function(x){
+  maxyr <- hua_22[Year2 == x + 1, min(Year)]
+  minyr <- hua_22[Year2 == x - 1, max(Year)]
+  dat_x <- hua_22[Year2 == x | Year == maxyr | Year == minyr, ]
+  mn_yr <- data.table(yr = x,
+                      d14c_mn = dat_x[, sum(d14C_mean/d14C_sd^2)/sum(1/d14C_sd^2)],
+                      d14c_sd = dat_x[, max(c(sqrt(1/sum(1/d14C_sd^2)),
+                                      sqrt((.N * sum((d14C_mean - sum(d14C_mean/d14C_sd^2)/sum(1/d14C_sd^2))^2/d14C_sd^2))/((.N - 1) * sum(1/d14C_sd^2)))))],
+                      f14c_mn = dat_x[, sum(F14C_mean/F14C_sd^2)/sum(1/F14C_sd^2)],
+                      f14c_sd = dat_x[, max(c(sqrt(1/sum(1/F14C_sd^2)),
+                                      sqrt((.N * sum((F14C_mean - sum(F14C_mean/F14C_sd^2)/sum(1/F14C_sd^2))^2/F14C_sd^2))/((.N - 1) * sum(1/F14C_sd^2)))))])
+  return(mn_yr)
+})
+
+hua_22_yr2 <- rbindlist(hua_22_yr, use.names = T, fill = T)
+
+
+
+# hua_bp <- fread(here::here("CalCurve/Marine_v_Atmospheric_f14c.csv"), na.strings = c("NA", "", "NULL"))
+# hobs_wpier <- fread(here::here("Summer2023/NewCurve_wMarine20_vals_2026-01-27.csv"), na.strings = c("NA", "", "NULL"))
+intcal20 <- fread(here::here("CalCurve/intcal20.txt"), sep = ",", skip = 10, na.strings = c("NA", "", "NULL"))
+setnames(intcal20, colnames(intcal20), c("year_bp", "14c_age", "14c_age_sd", "d14c", "d14c_sd"))
+intcal20[, yr := 1950 - year_bp]
+intcal20[, `:=` (f14c_calc = rice::C14toF14C(`14c_age`, er = `14c_age_sd`)[,1],
+                 f14c_calc_sd = rice::C14toF14C(`14c_age`, er = `14c_age_sd`)[,2])]
+
+# curves <- merge(hobs_wpier[, .(year, f14c_durham = f14c, f14c_durham_sd = f14c_sd)],
+#                 hua_bp[, .(year, f14c_hua)], by = "year", all.x = T)
+
+atm_curve <- rbindlist(list(intcal20[, .(yr, d14c, d14c_sd, f14c = f14c_calc, f14c_sd = f14c_calc_sd)], 
+                            hua_22_yr2[yr > 1950, .(yr, d14c = d14c_mn, d14c_sd, f14c = f14c_mn, f14c_sd)], 
+                            data.table(yr = seq(2000, 2025))), use.names = T, fill = T)
+
+#Get annual draws off updated regional calibration curve (default was every half year)
+gamtest7 <- readRDS(here::here("gamtest7b_update20260113.rds"))
+
+#Code from "hobs_geochronology_update_walker.R"
+set.seed(888)
+newdat <- data.table(year = seq(min(gamtest7$data$year), 2025, 1), #Original 2023 work included years up to 2022, but with J. Goben data we have increased it to 2025
+                     current = 65,
+                     source = "shell")
+predvals <- posterior_predict(gamtest7, newdata = newdat, ndraws = 1000, allow_new_levels = TRUE)
+newcurvepreds <- newdat[, .(year)]
+for(i in seq(1, nrow(newcurvepreds))){
+  newcurvepreds[i, `:=` (f14c_mn = mean(predvals[, i]),
+                         f14c_sd = sd(predvals[, i]))]
+}
+
+#rename year column to avoid conflict with env_d_yr90 column of same name
+setnames(newcurvepreds, "year", "yr")
+
+
+#Check whether hua_bp can be extended to 2025 with linear approximation
+ggplot(hua_bp[year >= 2010 & !is.na(f14c_hua), ], aes(x = year, y = f14c_hua)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  theme_bw()
+
+#Check whether atm_curve can be extended to 2025 with linear approximation
+# ggplot(atm_curve[yr >= 2010 & !is.na(f14c), ], aes(x = yr, y = f14c)) +
+ggplot(atm_curve[yr >= 2010 & !is.na(d14c), ], aes(x = yr, y = d14c)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  theme_bw()
+
+curves2 <- merge(atm_curve[yr >= -8050 & !is.na(f14c), .(yr, d14c_atm = d14c, d14c_sd_atm = d14c_sd, f14c_atm = f14c, f14c_atm_sd = f14c_sd)], 
+                 newcurvepreds[yr > 1950, .(yr, f14c_mar = f14c_mn, f14c_mar_sd = f14c_sd)],
+                 by = "yr",
+                 all = T)
+
+#Looks almost linear, but a slight curve might fit best, using the relationship with f14c_durham to help the model
+atm_extend <- brm(bf(f14c_atm ~ yr + me(f14c_mar, f14c_mar_sd),
+                     sigma ~ yr + f14c_atm_sd),
+                  family = gaussian(),
+                  data = curves2[yr >= 2000, ],
+                  cores = 4, warmup = 1500, iter = 5000,
+                  control = c(adapt_delta = 0.95, max_treedepth = 15),
+                  backend = "cmdstanr", threads = threading(2),
+                  file = here::here("Summer2023/atm_extend.rds"))
+
+atm_extend2 <- brm(f14c_atm | se(f14c_atm_sd) ~ yr + me(f14c_mar, f14c_mar_sd),
+                  family = gaussian(),
+                  data = curves2[yr >= 2000, ],
+                  cores = 4, warmup = 1500, iter = 5000,
+                  control = c(adapt_delta = 0.95, max_treedepth = 15),
+                  backend = "cmdstanr", threads = threading(2),
+                  file = here::here("Summer2023/atm_extend2.rds"))
+
+#ChatGPT 5.2 thought the other two models were way overkill for predicting only 6 years of atm curve, and suggested fitting this spline instead using standardized years
+
+atmpreddat <- copy(curves2[yr >= 2000 & !is.na(f14c_atm), ])
+atmpreddat[, yr2 := yr - 2000]
+
+atm_extend3 <- brm(bf(f14c_atm ~ s(yr2, k = 8),
+                      sigma ~ 1),
+                   family = gaussian(),
+                   prior = prior(normal(0, 0.05), class = "sds"),
+                   data = atmpreddat,
+                   cores = 4, warmup = 1500, iter = 5000,
+                   control = c(adapt_delta = 0.9, max_treedepth = 10),
+                   backend = "cmdstanr", threads = threading(2),
+                   file = here::here("Summer2023/atm_extend3.rds"))
+
+# set.seed(231)
+# hua_extdat <- posterior_predict(hua_extend, newdata = curves[year >= 2000, ])
+# curves[year >= 2000, `:=` (hua_ext = mean(hua_extdat[, which(curves[year >= 2000, year] == year)]),
+#                            hua_ext_sd = sd(hua_extdat[, which(curves[year >= 2000, year] == year)])), by = year]
+# 
+# #Check correspondence (looks pretty good)
+# ggplot(curves[year >= 2000, ]) +
+#   geom_point(aes(x = year, y = f14c_hua)) +
+#   geom_point(aes(x = year, y = hua_ext), color = "firebrick") +
+#   theme_bw()
+# 
+# #Finish merging the curves
+# curves[year <= 1950, f14c_hua := intcal20[yr == year, f14c_calc], by = year]
+# curves[is.na(f14c_hua), f14c_hua := hua_ext]
+# curves[year <= 1950, `:=` (durham_source = "Marine20",
+#                            hua_source = "IntCal20",
+#                            script = "HOBS_Notebook_2025_Geochron.Rmd")]
+# curves[year > 1950 & year <= 2019, `:=` (durham_source = "NewCurve_wMarine20_vals_2026-01-27.csv",
+#                                          hua_source = "Hua et al. (2022)",
+#                                          script = "HOBS_Notebook_2025_Geochron.Rmd")]
+# curves[year > 2019, `:=` (durham_source = "NewCurve_wMarine20_vals_2026-01-27.csv",
+#                           hua_source = "Model prediction (hua_extend.rds)",
+#                           script = "HOBS_Notebook_2025_Geochron.Rmd")]
+# 
+# fwrite(curves, here::here(paste0("CalCurve/Marine_v_Atmospheric_f14c_v2_", Sys.Date(), ".csv")))
+
+
+
+#Temperature data
+# temp_con <- fread("C:/Users/steph/Dropbox/Steve_CurrentProjects/HOBS/JQP_GR/Combined_WQ_WC_NUT_cont_Water_Temperature_NE-2024-Jan-10.txt", sep = "|", na.strings = c("NA", "NULL", ""))
+# temp_dis <- fread("C:/Users/steph/Dropbox/Steve_CurrentProjects/HOBS/JQP_GR/Combined_WQ_WC_NUT_Water_Temperature-2024-Jan-10.txt", sep = "|", na.strings = c("NA", "NULL", ""))
+temp_con <- fread(here::here("CalCurve/SEACAR Combined Tables/Combined_WQ_WC_NUT_cont_Water_Temperature_NE-2025-Dec-10.txt"), sep = "|", na.strings = c("NA", "NULL", ""))
+temp_dis <- fread(here::here("CalCurve/SEACAR Combined Tables/Combined_WQ_WC_NUT_Water_Temperature-2025-Dec-10.txt"), sep = "|", na.strings = c("NA", "NULL", ""))
+
+
+#Salinity data
+# sal_con <- fread("C:/Users/steph/Dropbox/Steve_CurrentProjects/HOBS/JQP_GR/Combined_WQ_WC_NUT_cont_Salinity_NE-2024-Jan-10.txt", sep = "|", na.strings = c("NA", "NULL", ""))
+# sal_dis <- fread("C:/Users/steph/Dropbox/Steve_CurrentProjects/HOBS/JQP_GR/Combined_WQ_WC_NUT_Salinity-2024-Jan-10.txt", sep = "|", na.strings = c("NA", "NULL", ""))
+sal_con <- fread(here::here("CalCurve/SEACAR Combined Tables/Combined_WQ_WC_NUT_cont_Salinity_NE-2025-Dec-10.txt"), sep = "|", na.strings = c("NA", "NULL", ""))
+sal_dis <- fread(here::here("CalCurve/SEACAR Combined Tables/Combined_WQ_WC_NUT_Salinity-2025-Dec-10.txt"), sep = "|", na.strings = c("NA", "NULL", ""))
+
+#Merge salinity and temperature data sources
+temp_con[, `:=` (ValueQualifier = as.character(ValueQualifier),
+                 ActivityType = as.character(ActivityType),
+                 DetectionUnit = as.character(DetectionUnit),
+                 SampleFraction = as.character(SampleFraction))]
+temp_gr <- bind_rows(temp_con[str_detect(ManagedAreaName, "Guana River Marsh Aquatic Preserve") & Include == 1, ],
+                     temp_dis[str_detect(ManagedAreaName, "Guana River Marsh Aquatic Preserve") & Include == 1, ])
+sal_con[, `:=` (ValueQualifier = as.character(ValueQualifier),
+                ActivityType = as.character(ActivityType),
+                DetectionUnit = as.character(DetectionUnit),
+                SampleFraction = as.character(SampleFraction))]
+sal_gr <- bind_rows(sal_con[str_detect(ManagedAreaName, "Guana River Marsh Aquatic Preserve") & Include == 1, ],
+                    sal_dis[str_detect(ManagedAreaName, "Guana River Marsh Aquatic Preserve") & Include == 1, ])
+
+temp_seacar <- bind_rows(temp_con[Include == 1, ],
+                         temp_dis[Include == 1, ])
+
+sal_seacar <- bind_rows(sal_con[Include == 1, ],
+                        sal_dis[Include == 1, ])
+
+#Summarize salinity and temperature by year
+temp_gr_sum <- temp_gr[, .(q_low = quantile(ResultValue, probs = 0.05), 
+                           median = quantile(ResultValue, probs = 0.5), 
+                           q_high = quantile(ResultValue, probs = 0.95)), by = Year]
+
+sal_gr_sum <- sal_gr[, .(q_low = quantile(ResultValue, probs = 0.05), 
+                         median = quantile(ResultValue, probs = 0.5), 
+                         q_high = quantile(ResultValue, probs = 0.95)), by = Year]
+
+temp_seacar_sum <- temp_seacar[, .(q_low = quantile(ResultValue, probs = 0.05), 
+                                   median = quantile(ResultValue, probs = 0.5), 
+                                   q_high = quantile(ResultValue, probs = 0.95)), by = Year]
+
+sal_seacar_sum <- sal_seacar[, .(q_low = quantile(ResultValue, probs = 0.05), 
+                                 median = quantile(ResultValue, probs = 0.5), 
+                                 q_high = quantile(ResultValue, probs = 0.95)), by = Year]
+
+#Create a list of data.tables for each year, using the two curves as end-members and relating them to each other by salinity (i.e., mixing lines)
+byyr_v2 <- lapply(curves$year, function(x){ #[which(curves$year <= 2019)]
+  yrdat <- data.table(sal = c(0, 35),
+                      f14c = c(curves[year == x, f14c_hua], curves[year == x, f14c_durham]))
+  
+  #Need to weight the mixing lines by DIC contribution since rainwater has much lower DIC than seawater (suggestion from ChatGPT 5.2)
+  #Endmembers:
+  dic_sw <- 2000 #https://www.ncei.noaa.gov/access/ocean-carbon-acidification-data-system/oceans/Handbook_2007/Guide_all_in_one.pdf
+  f14c_sw <- yrdat[sal == 35, f14c] #Marine curve value
+  dic_fw <- 40 #https://www.jstor.org/stable/j.ctv30pnvjd I have found it very difficult to find literature values of DIC concentration in rainwater; most DIC studies of streams I have found seem to ignore it and focus on surface runoff, shallow soil, and deeper soil/geologic processes, including production through biological processes and weathering.
+  f14c_fw <- yrdat[sal == 0, f14c] #Atmospheric curve value
+  
+  f14c_wt <- lapply(seq(0, 50), function(s){
+    f_sw <- s/34
+    f_fw <- 1 - f_sw
+    c_mix <- (f_sw * dic_sw) + (f_fw * dic_fw)
+    f14c_mix <- ((f_sw * dic_sw * f14c_sw) + (f_fw * dic_fw * f14c_fw)) / c_mix
+    
+    f14c_s <- data.table(yr = x,
+                         sal = s,
+                         f14c_wt = f14c_mix)
+    
+    return(f14c_s)
+  })
+  
+  # yrlm <- lm(f14c ~ sal, data = yrdat)
+  # yrdat_full <- data.table(sal = seq(0, 50),
+  #                          f14c = seq(0, 50) * yrlm$coefficients[2] + yrlm$coefficients[1])
+  # yrdat_full
+  
+  f14c_wt2 <- rbindlist(f14c_wt, use.names = T, fill = T)
+  
+  return(f14c_wt2)
+})
+
+#Merge the yearly mixing lines into a single data.table
+# names(byyr) <- curves$year[which(curves$year <= 2019)]
+# byyr2 <- rbindlist(byyr, idcol = TRUE)
+# setnames(byyr2, ".id", "yr")
+
+byyr_v2b <- rbindlist(byyr_v2, use.names = T, fill = T)
+
+#Create a wide-format version for later plotting
+# byyr3 <- pivot_wider(byyr2, names_from = "yr", values_from = "f14c")
+byyr3 <- pivot_wider(byyr_v2b[yr >= 1950, ], names_from = "yr", values_from = "f14c_wt")
+
+# #Create columns for the mixing line end-members
+# byyr2[, `:=` (f14c_high = f14c + curves[year == yr, unique(f14c_durham_sd)],
+#                  f14c_low = f14c - curves[year == yr, unique(f14c_durham_sd)]), by = yr]
+# 
+# #Create columns for the possible F14C values based on salinity, and a numeric year index (starting at 1)
+# byyr2[, `:=` (f14c_high_p = ifelse(f14c_high > byyr2[sal == 34, max(f14c_high)], byyr2[sal == 34, max(f14c_high)], f14c_high),
+#               f14c_low_p = ifelse(f14c_low < byyr2[sal == 34, min(f14c_low)], byyr2[sal == 34, min(f14c_low)], f14c_low),
+#               yr_0 = as.integer(factor(yr)) + 1)]
+# 
+# #Create columns for the median, 25% and 75% quantile values from the salinity data summary table
+# byyr2[, `:=` (q_low = sal_gr_sum[str_detect(yr, as.character(Year)), q_low],
+#               median = sal_gr_sum[str_detect(yr, as.character(Year)), median],
+#               q_high = sal_gr_sum[str_detect(yr, as.character(Year)), q_high]), by = yr]
+# 
+# #Create a column to exclude values that are outside of the mixing line end-member values for F14C or outside the IQR for salinity
+# byyr2[, include := ifelse(f14c <= byyr2[sal == 34, max(f14c_high)] & f14c >= byyr2[sal == 34, min(f14c_low)], 1, 0)]
+# byyr2[include == 1 & (sal < q_low | sal > q_high), include := 0]
+# 
+# #Create a F14C reference column from the marine end-member values, and use it to create a column for estimated Dead C
+# byyr2 <- merge(byyr2, byyr2[sal == 34, .(yr, f14c)], by = "yr", all.x = TRUE)
+# setnames(byyr2, c("f14c.x", "f14c.y"), c("f14c", "f14c_ref"))
+# byyr2[, deadc := 1 - (f14c/f14c_ref)]
+
+#Create a matrix from byyr3 for plotting using plotly
+f14c <- as.matrix(byyr3[,-1, with = FALSE])
+row.names(f14c) <- byyr3[[1]]
+colnames(f14c) <- colnames(byyr3)[2:length(colnames(byyr3))]
+
+
+```
+
+
+
+```{r}
+
+f14c_surf <- plot_ly(z = ~f14c) %>%
+  add_surface(alpha = 0.85) %>%
+  layout(scene = list(xaxis = list(title = "Year"),
+                                   # ticktext = c(as.character(seq(6, 32, by = 2))),
+                                   # ticktext = c(as.character(seq(32, 6, by = -2))),
+                                   # tickvals = which(colnames(env_d_r2) %in% c(as.character(seq(6, 32, by = 2))))),
+                                   # tickvals = which(colnames(env_d_r_gr) %in% c(as.character(seq(32, 6, by = -2))))),
+                      yaxis = list(title = "Salinity"),
+                                   # ticktext = c(as.character(seq(41, 3, by = -2))),
+                                   # tickvals = c(as.character(seq(41, 3, by = -2)))),
+                                   # ticktext = c(as.character(seq(3, 41, by = 2))),
+                                   # tickvals = c(as.character(seq(3, 41, by = 2)))),
+                      zaxis = list(title = "F14C")))
+f14c_surf
+```
+
+
+A number of studies suggest oyster growth is maximized at ~15ppt salinity and ~20-27C temperature, so it might make some sense to weight the possible F14C/Dead C by those variables to look at seasonal patterns and potentially justify narrowing them.
+
+```{r}
+#Merge salinity and temperature data by daily averages
+sal_gr[, `:=` (day = yday(SampleDate),
+               year = year(SampleDate))]
+sal_d <- copy(sal_gr[, .(sal_med = median(ResultValue),
+                         sal_q25 = quantile(ResultValue, 0.25),
+                         sal_q75 = quantile(ResultValue, 0.75)), by = list(year, day)])
+
+temp_gr[, `:=` (day = yday(SampleDate),
+                year = year(SampleDate))]
+temp_d <- copy(temp_gr[, .(temp_med = median(ResultValue),
+                           temp_q25 = quantile(ResultValue, 0.25),
+                           temp_q75 = quantile(ResultValue, 0.75)), by = list(year, day)])
+
+#NEED TO FILTER THESE SPATIALLY BY HOBS_LOC AND ADD THE CATEGORIES TO "BY"
+sal_seacar[, `:=` (day = yday(SampleDate),
+                   year = year(SampleDate))]
+sal_seacar_d <- copy(sal_seacar[, .(sal_med = median(ResultValue),
+                                    sal_q25 = quantile(ResultValue, 0.25),
+                                    sal_q75 = quantile(ResultValue, 0.75)), by = list(year, day)])
+
+temp_seacar[, `:=` (day = yday(SampleDate),
+                    year = year(SampleDate))]
+temp_seacar_d <- copy(temp_seacar[, .(temp_med = median(ResultValue),
+                                      temp_q25 = quantile(ResultValue, 0.25),
+                                      temp_q75 = quantile(ResultValue, 0.75)), by = list(year, day)])
+
+
+env_d <- merge(sal_d, temp_d, by = c("year", "day"), all = T)
+
+#Response surface regression models from Lowe et al. (2017), Table 3
+#Spat (< 25mm): Growth = –26.18 + 2.91 (Temp) + –0.055 (Temp)2 + 0.012 (Sal)2
+#Seed (25mm <= x <= 75mm): Growth = –19.49 + 1.97 (Temp) + 0.12 (Sal) + –0.036 (Temp)2
+#Sack (> 75mm): Growth = –2.81 + 0.29 (Temp) + 0.22 (Sal) + –0.0074 (Temp)2 + –0.0068 (Sal)2
+
+env_d[!is.na(temp_med) & !is.na(sal_med), `:=` (gr_spat = -26.18 + 2.91 * (temp_med) - 0.055 * (temp_med)^2 + 0.012 * (sal_med)^2,
+                                                gr_seed = -19.49 + 1.97 * (temp_med) + 0.12 * (sal_med) - 0.036 * (temp_med)^2,
+                                                gr_sack = -2.81 + 0.29 * (temp_med) + 0.22 * (sal_med) - 0.0074 * (temp_med)^2 - 0.0068 * (sal_med)^2)]
+
+
+#Create a wide-format grid version for plotting
+env_d[!is.na(sal_med) & !is.na(temp_med), `:=` (sal_medr = round(sal_med), 
+                                                temp_medr = round(temp_med))]
+env_d[!is.na(sal_med) & !is.na(temp_med) & year %in% names(table(env_d$year))[which(table(env_d$year) >= 329)], env_freq := .N, by = list(sal_medr, temp_medr)]
+env_d_r <- unique(env_d[!is.na(sal_med) & !is.na(temp_med) & year %in% names(table(env_d$year))[which(table(env_d$year) >= 329)], .(sal_medr, temp_medr, env_freq)])
+env_d_r[, `:=` (gr_spat = -26.18 + 2.91 * (temp_medr) - 0.055 * (temp_medr)^2 + 0.012 * (sal_medr)^2,
+                gr_seed = -19.49 + 1.97 * (temp_medr) + 0.12 * (sal_medr) - 0.036 * (temp_medr)^2,
+                gr_sack = -2.81 + 0.29 * (temp_medr) + 0.22 * (sal_medr) - 0.0074 * (temp_medr)^2 - 0.0068 * (sal_medr)^2)]
+env_d_r_gr <- pivot_wider(env_d_r[sal_medr > 0, .(sal_medr, temp_medr, gr_spat)], names_from = "temp_medr", values_from = "gr_spat")
+env_d_r_gr <- pivot_wider(env_d_r[sal_medr > 0, .(sal_medr, temp_medr, gr_seed)], names_from = "temp_medr", values_from = "gr_seed")
+env_d_r_gr <- pivot_wider(env_d_r[sal_medr > 0, .(sal_medr, temp_medr, gr_sack)], names_from = "temp_medr", values_from = "gr_sack")
+
+env_d_r_gr <- setorder(env_d_r_gr, sal_medr)
+# env_d_r_gr <- setcolorder(env_d_r_gr, c("sal_medr", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32"))
+
+#try reversing temp.
+env_d_r_gr <- setcolorder(env_d_r_gr, c("sal_medr", "32", "31", "30", "29", "28", "27", "26", "25", "24", "23", "22", "21", "20", "19", "18", "17", "16", "15", "14", "13", "12", "11", "10", "9", "8", "7", "6"))
+
+growth <- as.matrix(env_d_r_gr[,-1, with = FALSE])
+row.names(growth) <- env_d_r_gr[[1]]
+colnames(growth) <- colnames(env_d_r_gr)[2:length(colnames(env_d_r_gr))]
+
+
+env_d_r_fq <- pivot_wider(env_d_r[sal_medr > 0, .(sal_medr, temp_medr, env_freq)], names_from = "temp_medr", values_from = "env_freq")
+
+env_d_r_fq <- setorder(env_d_r_fq, sal_medr)
+# env_d_r_fq <- setcolorder(env_d_r_fq, c("sal_medr", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32"))
+
+#try reversing temp.
+env_d_r_fq <- setcolorder(env_d_r_fq, c("sal_medr", "32", "31", "30", "29", "28", "27", "26", "25", "24", "23", "22", "21", "20", "19", "18", "17", "16", "15", "14", "13", "12", "11", "10", "9", "8", "7", "6"))
+
+
+env_freq <- as.matrix(env_d_r_fq[,-1, with = FALSE])
+row.names(env_freq) <- env_d_r_fq[[1]]
+colnames(env_freq) <- colnames(env_d_r_fq)[2:length(colnames(env_d_r_fq))]
+
+
+```
+
+```{r}
+
+gr_surf <- plot_ly(z = ~growth) %>%
+  add_surface(alpha = 0.85) %>%
+  layout(scene = list(xaxis = list(title = "Temperature",
+                                   # ticktext = c(as.character(seq(6, 32, by = 2))),
+                                   ticktext = c(as.character(seq(32, 6, by = -2))),
+                                   # tickvals = which(colnames(env_d_r2) %in% c(as.character(seq(6, 32, by = 2))))),
+                                   tickvals = which(colnames(env_d_r_gr) %in% c(as.character(seq(32, 6, by = -2))))),
+                      yaxis = list(title = "Salinity",
+                                   # ticktext = c(as.character(seq(41, 3, by = -2))),
+                                   # tickvals = c(as.character(seq(41, 3, by = -2)))),
+                                   ticktext = c(as.character(seq(3, 41, by = 2))),
+                                   tickvals = c(as.character(seq(3, 41, by = 2)))),
+                      zaxis = list(title = "Growth rate")))
+gr_surf
+```
+
+
+
+```{r}
+
+fq_surf <- plot_ly(z = ~env_freq) %>%
+  add_surface(alpha = 0.85) %>%
+  layout(scene = list(xaxis = list(title = "Temperature",
+                                   # ticktext = c(as.character(seq(6, 32, by = 2))),
+                                   ticktext = c(as.character(seq(32, 6, by = -2))),
+                                   # tickvals = which(colnames(env_d_r2) %in% c(as.character(seq(6, 32, by = 2))))),
+                                   # tickvals = which(colnames(env_d_r2) %in% c(as.character(seq(32, 6, by = -2))))),
+                                   tickvals = which(colnames(env_freq) %in% c(as.character(seq(32, 6, by = -2))))),
+                      yaxis = list(title = "Salinity",
+                                   ticktext = c(as.character(seq(41, 3, by = -2))),
+                                   tickvals = c(as.character(seq(41, 3, by = -2)))),
+                      zaxis = list(title = "Frequency (days)")))
+fq_surf
+```
+
+
+The freq plot doesn't seem right; check it with a tile plot in ggplot2.
+```{r}
+#Only consider years with data from at least 90% of days
+env_d_yr90 <- env_d[!is.na(sal_med) & !is.na(temp_med) & year %in% names(table(env_d$year))[which(table(env_d$year) >= 329)] & sal_med > 0, ]
+
+env_d_yr90[, `:=` (sal_medr2 = factor(sal_medr), 
+                   temp_medr2 = factor(temp_medr),
+                   env_freq2 = env_freq/max(env_freq))]
+
+ggplot(env_d_yr90) + 
+  geom_tile(aes(x = sal_medr2, y = temp_medr2, fill = env_freq2)) + 
+  theme_bw()
+
+```
+
+
+Weight the growth surface by the frequency of the relevant environmental conditions
+```{r}
+#This modifies the growth surface slightly, but I think the relative values are more important for selecting plausible Dead C
+# env_d_yr90[, `:=` (gr_spat_wt = gr_spat + (gr_spat * env_freq2),
+#                    gr_seed_wt = gr_seed + (gr_seed * env_freq2),
+#                    gr_sack_wt = gr_sack + (gr_sack * env_freq2))]
+env_d_yr90[, `:=` (gr_spat_s = ((gr_spat - min(gr_spat))/diff(range(gr_spat))),
+                   gr_seed_s = ((gr_seed - min(gr_seed))/diff(range(gr_seed))),
+                   gr_sack_s = ((gr_sack - min(gr_sack))/diff(range(gr_sack))),
+                   gr_spat_swt = ((gr_spat - min(gr_spat))/diff(range(gr_spat))) * env_freq2,
+                   gr_seed_swt = ((gr_seed - min(gr_seed))/diff(range(gr_seed))) * env_freq2,
+                   gr_sack_swt = ((gr_sack - min(gr_sack))/diff(range(gr_sack))) * env_freq2)]
+
+
+gr <- ggplot(env_d_yr90) + 
+  geom_tile(aes(x = sal_medr2, y = temp_medr2, fill = gr_sack_s)) + 
+  theme_bw()
+
+gr_wt <- ggplot(env_d_yr90) + 
+  geom_tile(aes(x = sal_medr2, y = temp_medr2, fill = gr_sack_swt)) + 
+  theme_bw()
+
+gr + gr_wt
+
+```
+
+Try an updated 3D surface plot of the weighted growth
+```{r}
+env_d_r2 <- unique(env_d_yr90[, .(gr_sack_wt_med = round(median(gr_sack_swt), 3),
+                                  gr_sack_s_med = round(median(gr_sack_s), 3)), by = list(sal_medr, temp_medr)])
+env_d_r2_gr <- pivot_wider(env_d_r2[sal_medr > 0, .(sal_medr, temp_medr, gr_sack_wt_med)], names_from = "temp_medr", values_from = "gr_sack_wt_med")
+
+env_d_r2_gr <- setorder(env_d_r2_gr, -sal_medr)
+# env_d_r2_gr <- setcolorder(env_d_r2_gr, c("sal_medr", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32"))
+
+#try reversing temp.
+env_d_r2_gr <- setcolorder(env_d_r2_gr, c("sal_medr", "32", "31", "30", "29", "28", "27", "26", "25", "24", "23", "22", "21", "20", "19", "18", "17", "16", "15", "14", "13", "12", "11", "10", "9", "8", "7", "6"))
+
+growth_wt <- as.matrix(env_d_r2_gr[,-1, with = FALSE])
+row.names(growth_wt) <- env_d_r2_gr[[1]]
+colnames(growth_wt) <- colnames(env_d_r2_gr)[2:length(colnames(env_d_r2_gr))]
+
+
+
+gr_wt_surf <- plot_ly(z = ~growth_wt) %>%
+  add_surface(alpha = 0.85) %>%
+  layout(scene = list(xaxis = list(title = "Temperature",
+                                   # ticktext = c(as.character(seq(6, 32, by = 2))),
+                                   ticktext = c(as.character(seq(32, 6, by = -2))),
+                                   # tickvals = which(colnames(env_d_r2) %in% c(as.character(seq(6, 32, by = 2))))),
+                                   tickvals = which(colnames(env_d_r2_gr) %in% c(as.character(seq(32, 6, by = -2))))),
+                      yaxis = list(title = "Salinity",
+                                   ticktext = c(as.character(seq(41, 3, by = -2))),
+                                   tickvals = c(as.character(seq(41, 3, by = -2)))),
+                      zaxis = list(title = "Growth rate (weighted)")))
+gr_wt_surf
+
+```
+
+
+#Start w/ Daily Growth
+Let's try thinking about this in terms of daily growth; then can total the potential mm of growth relative to total potential growth rather than weighting
+```{r}
+#Lowe et al. 2017 used 30.4 days/month to standardize values to monthly growth
+env_d_yr90[, `:=` (gr_spat_d = gr_spat/30.4,
+                   gr_seed_d = gr_seed/30.4,
+                   gr_sack_d = gr_sack/30.4)]
+
+env_d_r3 <- unique(env_d_yr90[, .(sal_medr2,
+                                  temp_medr2,
+                                  gr_spat_dtot = round(sum(gr_spat_d), 3),
+                                  gr_seed_dtot = round(sum(gr_seed_d), 3),
+                                  gr_sack_dtot = round(sum(gr_sack_d), 3)), by = list(sal_medr, temp_medr)])
+
+env_d_r3[, `:=` (gr_spat_dtots = (gr_spat_dtot - min(gr_spat_dtot))/diff(range(gr_spat_dtot)),
+                 gr_seed_dtots = (gr_seed_dtot - min(gr_seed_dtot))/diff(range(gr_seed_dtot)),
+                 gr_sack_dtots = (gr_sack_dtot - min(gr_sack_dtot))/diff(range(gr_sack_dtot)),
+                 gr_spat_dtotp = (gr_spat_dtot + abs(gr_spat_dtot))/sum(gr_spat_dtot + abs(gr_spat_dtot)),
+                 gr_seed_dtotp = (gr_seed_dtot + abs(gr_seed_dtot))/sum(gr_seed_dtot + abs(gr_seed_dtot)),
+                 gr_sack_dtotp = (gr_sack_dtot + abs(gr_sack_dtot))/sum(gr_sack_dtot + abs(gr_sack_dtot)))]
+
+#Find median by calculating the cumulative sum and estimating where it reacheas 50% of total
+n_med <- which(cumsum(sort(env_d_r3$gr_sack_dtotp, decreasing = F)) - 0.5 > 0)[1] 
+med_val <- sort(env_d_r3$gr_sack_dtotp, decreasing = F)[n_med]
+n_med_seed <- which(cumsum(sort(env_d_r3$gr_seed_dtotp, decreasing = F)) - 0.5 > 0)[1] 
+med_val_seed <- sort(env_d_r3$gr_seed_dtotp, decreasing = F)[n_med_seed]
+n_med_spat <- which(cumsum(sort(env_d_r3$gr_spat_dtotp, decreasing = F)) - 0.5 > 0)[1] 
+med_val_spat <- sort(env_d_r3$gr_spat_dtotp, decreasing = F)[n_med_spat]
+
+env_d_r3[, `:=` (gr_sack_dtotp_med = med_val,
+                 gr_seed_dtotp_med = med_val_seed,
+                 gr_spat_dtotp_med = med_val_spat)]
+
+env_d_r3_gr <- pivot_wider(env_d_r3[sal_medr > 0, .(sal_medr, temp_medr, gr_sack_dtotp)], names_from = "temp_medr", values_from = "gr_sack_dtotp")
+setDT(env_d_r3_gr)
+env_d_r3_gr_med <- pivot_wider(env_d_r3[sal_medr > 0 & gr_sack_dtotp <= med_val, .(sal_medr, temp_medr, gr_sack_dtotp_med)], names_from = "temp_medr", values_from = "gr_sack_dtotp_med")
+setDT(env_d_r3_gr_med)
+
+env_d_r3_gr_seed <- pivot_wider(env_d_r3[sal_medr > 0, .(sal_medr, temp_medr, gr_seed_dtotp)], names_from = "temp_medr", values_from = "gr_seed_dtotp")
+setDT(env_d_r3_gr_seed)
+env_d_r3_gr_med_seed <- pivot_wider(env_d_r3[sal_medr > 0 & gr_seed_dtotp <= med_val_seed, .(sal_medr, temp_medr, gr_seed_dtotp_med)], names_from = "temp_medr", values_from = "gr_seed_dtotp_med")
+setDT(env_d_r3_gr_med_seed)
+
+env_d_r3_gr_spat <- pivot_wider(env_d_r3[sal_medr > 0, .(sal_medr, temp_medr, gr_spat_dtotp)], names_from = "temp_medr", values_from = "gr_spat_dtotp")
+setDT(env_d_r3_gr_spat)
+env_d_r3_gr_med_spat <- pivot_wider(env_d_r3[sal_medr > 0 & gr_spat_dtotp <= med_val_spat, .(sal_medr, temp_medr, gr_spat_dtotp_med)], names_from = "temp_medr", values_from = "gr_spat_dtotp_med")
+setDT(env_d_r3_gr_med_spat)
+
+env_d_r3_gr <- setorder(env_d_r3_gr, sal_medr)
+env_d_r3_gr_med <- setorder(env_d_r3_gr_med, sal_medr)
+env_d_r3_gr_seed <- setorder(env_d_r3_gr_seed, sal_medr)
+env_d_r3_gr_med_seed <- setorder(env_d_r3_gr_med_seed, sal_medr)
+env_d_r3_gr_spat <- setorder(env_d_r3_gr_spat, sal_medr)
+env_d_r3_gr_med_spat <- setorder(env_d_r3_gr_med_spat, sal_medr)
+
+# env_d_r2_gr <- setcolorder(env_d_r2_gr, c("sal_medr", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32"))
+
+#try reversing temp.
+env_d_r3_gr <- setcolorder(env_d_r3_gr, c("sal_medr", "32", "31", "30", "29", "28", "27", "26", "25", "24", "23", "22", "21", "20", "19", "18", "17", "16", "15", "14", "13", "12", "11", "10", "9", "8", "7", "6"))
+env_d_r3_gr_med <- setcolorder(env_d_r3_gr_med, c("sal_medr", "32", "31", "30", "29", "28", "27", "26", "25", "24", "23", "22", "21", "20", "19", "18", "17", "16", "15", "14", "13", "12", "11", "10", "9", "8", "7", "6"))
+# env_d_r3_gr <- setcolorder(env_d_r3_gr, c("sal_medr", "30", "29", "28", "27", "26", "25", "24", "23", "22", "21", "20", "19", "18", "17", "16", "15", "14"))
+
+growth_dtots <- as.matrix(env_d_r3_gr[,-1, with = FALSE])
+row.names(growth_dtots) <- env_d_r3_gr[[1]]
+colnames(growth_dtots) <- colnames(env_d_r3_gr)[2:length(colnames(env_d_r3_gr))]
+
+growth_dtots_med <- as.matrix(env_d_r3_gr_med[,-1, with = FALSE])
+row.names(growth_dtots_med) <- env_d_r3_gr_med[[1]]
+colnames(growth_dtots_med) <- colnames(env_d_r3_gr_med)[2:length(colnames(env_d_r3_gr_med))]
+
+
+
+gr_dtots_surf <- plot_ly(z = ~growth_dtots) %>%
+  add_surface(alpha = 0.85) %>%
+  layout(scene = list(xaxis = list(title = "Temperature",
+                                   # ticktext = c(as.character(seq(6, 32, by = 2))),
+                                   ticktext = c(as.character(seq(32, 6, by = -2))),
+                                   # tickvals = which(colnames(env_d_r2) %in% c(as.character(seq(6, 32, by = 2))))),
+                                   tickvals = which(colnames(env_d_r3_gr) %in% c(as.character(seq(32, 6, by = -2))))),
+                      yaxis = list(title = "Salinity",
+                                   # ticktext = c(as.character(seq(41, 3, by = -2))),
+                                   # tickvals = c(as.character(seq(41, 3, by = -2)))),
+                                   ticktext = c(as.character(seq(3, 41, by = 2))),
+                                   tickvals = c(as.character(seq(3, 41, by = 2)))),
+                      zaxis = list(title = "Growth potential")))
+
+gr_dtots_surf <- gr_dtots_surf %>% add_surface(z = ~growth_dtots_med, opacity = 0.99, colorscale = list(c(0, 1), c("red", "red")))
+
+gr_dtots_surf
+
+
+
+
+```
+
+
+Based on this plot, at least 50% of sack sized oyster growth in GR might be expected to take place between about 9 and 27 ppt, with the large majority taking place between about 15 and 27 ppt. What is the median salinity based on growth potential?
+
+```{r}
+# env_d_r3_s <- env_d_r3[sal_medr >= 9 & sal_medr <= 27, ]
+# 
+# #Restandardize gr_sack_dtotp
+# env_d_r3_s[, `:=` (gr_spat_dtotp = (gr_spat_dtot + abs(gr_spat_dtot))/sum(gr_spat_dtot + abs(gr_spat_dtot)),
+#                    gr_seed_dtotp = (gr_seed_dtot + abs(gr_seed_dtot))/sum(gr_seed_dtot + abs(gr_seed_dtot)),
+#                    gr_sack_dtotp = (gr_sack_dtot + abs(gr_sack_dtot))/sum(gr_sack_dtot + abs(gr_sack_dtot)))]
+
+
+salmed <- env_d_r3[gr_sack_dtotp == med_val, mean(sal_medr)]
+salmed_seed <- env_d_r3[gr_seed_dtotp == med_val_seed, mean(sal_medr)]
+salmed_spat <- env_d_r3[gr_spat_dtotp == med_val_spat, mean(sal_medr)]
+
+#Actually need to calculate the growth-weighted median of the upper 50% growth conditions in the same way as before, I think
+n_med_gr50 <- which(cumsum(sort(env_d_r3[gr_sack_dtotp >= gr_sack_dtotp_med, gr_sack_dtotp], decreasing = F)) - 0.5 > 0)[1] 
+med_val_gr50 <- sort(env_d_r3[gr_sack_dtotp >= gr_sack_dtotp_med, gr_sack_dtotp], decreasing = F)[n_med_gr50]
+n_med_seed_gr50 <- which(cumsum(sort(env_d_r3[gr_seed_dtotp >= gr_seed_dtotp_med, gr_seed_dtotp], decreasing = F)) - 0.5 > 0)[1] 
+med_val_seed_gr50 <- sort(env_d_r3[gr_seed_dtotp >= gr_seed_dtotp_med, gr_seed_dtotp], decreasing = F)[n_med_seed_gr50]
+n_med_spat_gr50 <- which(cumsum(sort(env_d_r3[gr_spat_dtotp >= gr_spat_dtotp_med, gr_spat_dtotp], decreasing = F)) - 0.5 > 0)[1] 
+med_val_spat_gr50 <- sort(env_d_r3[gr_spat_dtotp >= gr_spat_dtotp_med, gr_spat_dtotp], decreasing = F)[n_med_spat_gr50]
+
+env_d_r3[, `:=` (gr_sack_dtotp_med_gr50 = med_val_gr50,
+                 gr_seed_dtotp_med_gr50 = med_val_seed_gr50,
+                 gr_spat_dtotp_med_gr50 = med_val_spat_gr50)]
+
+
+```
+
+
+The median salinity based on "growth potential" for sack oysters using the GR temperature and salinity data and the equation from Lowe et al. is ~23.667.
+Update: after using the salinity and water temp data from the Dec. 10, 2025 export files, the median salinities for sack, seed, and spat oysters were 26, 36, and 36, respectively.
+
+Let's look at the seasons when the highest "growth potential" conditions are most common.
+```{r}
+#Add seasons to env_d_yr90
+maxd <- unique(env_d_yr90[, .(maxd = max(day)), by = year])
+env_d_yr90[year %in% maxd[maxd != 366, year], season := fcase(day >= 334 | day < 60, "W",
+                                                              day >= 60 & day < 152, "Sp",
+                                                              day >= 152 & day < 244, "Su",
+                                                              day >= 244 & day < 334, "F")]
+env_d_yr90[year %in% maxd[maxd == 366, year], season := fcase(day >= 335 | day < 61, "W",
+                                                              day >= 61 & day < 153, "Sp",
+                                                              day >= 153 & day < 245, "Su",
+                                                              day >= 245 & day < 335, "F")]
+env_d_yr90[, season := factor(season, levels = c("W", "Sp", "Su", "F"))]
+
+#Make a variable to identify the days with the correct conditions
+saltemps <- unique(env_d_r3[gr_sack_dtotp >= med_val, paste0(sal_medr, "_", temp_medr)])
+saltemps_seed <- unique(env_d_r3[gr_seed_dtotp >= med_val_seed, paste0(sal_medr, "_", temp_medr)])
+saltemps_spat <- unique(env_d_r3[gr_spat_dtotp >= med_val_spat, paste0(sal_medr, "_", temp_medr)])
+
+env_d_yr90[, saltemp := paste0(sal_medr, "_", temp_medr)]
+env_d_yr90[saltemp %in% saltemps, gr50_inc_sack := T]
+env_d_yr90[is.na(gr50_inc_sack), gr50_inc_sack := F]
+env_d_yr90[saltemp %in% saltemps_seed, gr50_inc_seed := T]
+env_d_yr90[is.na(gr50_inc_seed), gr50_inc_seed := F]
+env_d_yr90[saltemp %in% saltemps_spat, gr50_inc_spat := T]
+env_d_yr90[is.na(gr50_inc_spat), gr50_inc_spat := F]
+
+gr50_sack <- ggplot(env_d_yr90) +
+  geom_histogram(aes(x = day, group = gr50_inc_sack, fill = gr50_inc_sack)) +
+  theme_bw() +
+  labs(title = "Sack") +
+  theme(legend.position = "none")
+
+gr50_seed <- ggplot(env_d_yr90) +
+  geom_histogram(aes(x = day, group = gr50_inc_seed, fill = gr50_inc_seed)) +
+  theme_bw() +
+  labs(title = "Seed") +
+  theme(legend.position = "none")
+
+gr50_spat <- ggplot(env_d_yr90) +
+  geom_histogram(aes(x = day, group = gr50_inc_spat, fill = gr50_inc_spat)) +
+  theme_bw() +
+  labs(title = "Spat") +
+  theme(legend.position = "none")
+
+gr50_sack + gr50_seed + gr50_spat 
+
+
+```
+
+Growth potential is highest in the spring and fall for sack oysters and in the early summer for seed and spat oysters. Total observations per day are relatively similar across the year except for the first and last days and day ~200.
+
+#Investigate local carbonate dynamics 
+
+ChatGPT 5.2 made the point that the relationship between total alkalinity and salinity of a water body can provide insight into the DIC concentration in the freshwater sources, so I downloaded the available datasets for Guana River from WIN. There are at least some records of TA, so let's see if there's enough to see any kind of relationship.
+
+```{r}
+library(seacarb)
+
+# gr_win_files <- list.files(here::here("WIN_data/"), pattern = "^GRMAP_", full.names = T)
+win_files <- list.files(here::here("CalCurve/WIN_data/"), full.names = T)
+
+windat <- lapply(win_files, function(x){ 
+  dat_x <- fread(x, sep = "|", na.strings = c("", "NA", "NULL"))
+  
+  dat_x[, hobs_loc := str_sub(x, 
+                              max(str_locate_all(x, "\\/")[[1]]) + 1, 
+                              min(str_locate_all(x, "_")[[1]][which(str_locate_all(x, "_")[[1]] > max(str_locate_all(x, "\\/")[[1]]))]) - 1)]
+  
+  return(dat_x)
+  
+})
+
+# gr_win <- rbindlist(gr_win, use.names = T, fill = T)
+# gr_win <- janitor::clean_names(gr_win)
+windat <- rbindlist(windat, use.names = T, fill = T)
+windat <- janitor::clean_names(windat)
+# sort(unique(gr_win$dep_analyte_name))
+
+#Filter out activity types and QA flags according to standard SEACAR rules
+windat <- windat[hobs_loc != "LB" & activity_type %in% c("Field", "Field Msr/Obs", "Field Replicate", "Sample", "Sample-Composite", "Sample/Field"), ]
+windat <- windat[!(value_qualifier %in% c("H", "Y", "J", "V")), ]
+
+#filter for just relevant analytes
+# gr_win_as <- unique(gr_win[str_detect(dep_analyte_name, "Alkalinity|Salinity|Temperature, Water|pH|Carbon- Organic|Hardness- Calculated"), ])
+windat_as <- unique(windat[str_detect(dep_analyte_name, "Alkalinity|Salinity|Temperature, Water|pH|Carbon- Organic|^Hardness"), ])
+
+#remove GR stations that are above the dam
+# gr_win_as <- gr_win_as[str_detect(monitoring_location_name, "DAM NORTH|above the Dam", negate = T), ]
+windat_as <- windat_as[str_detect(monitoring_location_name, "DAM NORTH|above the Dam", negate = T), ]
+
+#create simple, wide version for plotting
+# gr_win_as2 <- pivot_wider(unique(gr_win_as[, .(monitoring_location_name, dep_latitude, dep_longitude, activity_start_date_time, activity_depth, dep_analyte_name, sample_fraction, dep_result_value_number)]), names_from = "dep_analyte_name", values_from = "dep_result_value_number")
+# setDT(gr_win_as2)
+# gr_win_as2 <- janitor::clean_names(gr_win_as2)
+# setnames(gr_win_as2, "p_h", "ph")
+windat_as2 <- pivot_wider(unique(windat_as[, .(result_mn = mean(dep_result_value_number)), by = list(hobs_loc, monitoring_location_name, dep_latitude, dep_longitude, activity_start_date_time, activity_depth, dep_analyte_name, sample_fraction)]), names_from = "dep_analyte_name", values_from = "result_mn") #, activity_type, dep_result_id
+setDT(windat_as2)
+windat_as2 <- janitor::clean_names(windat_as2)
+setnames(windat_as2, "p_h", "ph")
+
+#need to keep only dissolved organic carbon but only total alkalinity and hardness
+# gr_win_as3 <- merge(unique(gr_win_as2[sample_fraction == "" & (!is.na(ph) | !is.na(temperature_water) | !is.na(salinity)), -c("sample_fraction", "carbon_organic", "alkalinity_ca_co3", "hardness_calculated_ca_co3")]), 
+#                     unique(gr_win_as2[sample_fraction == "Total", -c("sample_fraction", "ph", "temperature_water", "salinity", "carbon_organic")]), by = c("monitoring_location_name", "dep_latitude", "dep_longitude", "activity_start_date_time", "activity_depth"), all.x = T)
+# gr_win_as3 <- merge(gr_win_as3, 
+#                     gr_win_as2[sample_fraction == "Dissolved", -c("sample_fraction", "ph", "temperature_water", "salinity", "alkalinity_ca_co3", "hardness_calculated_ca_co3")], by = c("monitoring_location_name", "dep_latitude", "dep_longitude", "activity_start_date_time", "activity_depth"), all.x = T)
+windat_as3 <- merge(unique(windat_as2[sample_fraction == "" & (!is.na(ph) | !is.na(temperature_water) | !is.na(salinity)), -c("sample_fraction", "carbon_organic", "alkalinity_ca_co3", "hardness_calculated_ca_co3", "hardness_ca_co3")]), 
+                    unique(windat_as2[sample_fraction == "Total", -c("sample_fraction", "ph", "temperature_water", "salinity", "carbon_organic")]), by = c("hobs_loc", "monitoring_location_name", "dep_latitude", "dep_longitude", "activity_start_date_time", "activity_depth"), all.x = T) #, "activity_type", "dep_result_id"
+windat_as3 <- merge(windat_as3, 
+                    windat_as2[sample_fraction == "Dissolved", -c("sample_fraction", "ph", "temperature_water", "salinity", "alkalinity_ca_co3", "hardness_calculated_ca_co3", "hardness_ca_co3")], by = c("hobs_loc", "monitoring_location_name", "dep_latitude", "dep_longitude", "activity_start_date_time", "activity_depth"), all.x = T) #, "activity_type", "dep_result_id"
+
+#properly format time and calculate year for plotting and analysis
+# gr_win_as3[, activity_start_date_time2 := as_datetime(activity_start_date_time, format = "%m/%d/%Y %H:%M:%S")]
+# gr_win_as3[, year := factor(year(activity_start_date_time2))]
+# gr_win_as3[, season := factor(fcase(month(activity_start_date_time2) %in% c(12, 1, 2), "W",
+#                                     month(activity_start_date_time2) %in% c(3, 4, 5), "Sp",
+#                                     month(activity_start_date_time2) %in% c(6, 7, 8), "Su",
+#                                     month(activity_start_date_time2) %in% c(9, 10, 11), "F"), levels = c("Sp", "Su", "F", "W"))]
+windat_as3[, activity_start_date_time2 := as_datetime(activity_start_date_time, format = "%m/%d/%Y %H:%M:%S")]
+windat_as3[, year := factor(year(activity_start_date_time2))]
+windat_as3[, season := factor(fcase(month(activity_start_date_time2) %in% c(12, 1, 2), "W",
+                                    month(activity_start_date_time2) %in% c(3, 4, 5), "Sp",
+                                    month(activity_start_date_time2) %in% c(6, 7, 8), "Su",
+                                    month(activity_start_date_time2) %in% c(9, 10, 11), "F"), levels = c("Sp", "Su", "F", "W"))]
+
+#fix some analyte names
+# setnames(gr_win_as3, 
+#          c("temperature_water", "salinity", "carbon_organic", "alkalinity_ca_co3", "hardness_calculated_ca_co3"),
+#          c("temp", "sal", "doc", "alk", "hard"))
+setnames(windat_as3, 
+         c("temperature_water", "salinity", "carbon_organic", "alkalinity_ca_co3", "hardness_calculated_ca_co3", "hardness_ca_co3"),
+         c("temp", "sal", "doc", "alk", "hard_calc", "hard_meas"))
+
+#Calculate an estimated DIC using the "seacarb" package (suggestion from ChatGPT 5.2)
+#convert depths to pressure in bar (1dbar = 0.1bar)
+# gr_win_as3[, pressure := d2p(depth = activity_depth, lat = dep_latitude)] # * 0.1
+windat_as3[, pressure := d2p(depth = activity_depth, lat = dep_latitude)] # * 0.1
+#calculate seawater density in kg/L (1 kg/m3 is 0.001 kg/L)
+# gr_win_as3[, density := rho(S = sal, T = temp, P = pressure) * 0.001]
+windat_as3[, density := rho(S = sal, T = temp, P = pressure) * 0.001]
+#convert alk from mg/L to mol/kg (formula from ChatGPT 5.2; 50 mg CaCO₃ = 1 meq, and 1000 meq = 1 mol of charge)
+# gr_win_as3[!is.na(alk), alk_mol := alk/(50 * 1000 * density)]
+windat_as3[!is.na(alk), alk_mol := alk/(50 * 1000 * density)]
+#plug values into the "carb" function (flag 8 means pH and ALK given)
+# gr_win_as3[!is.na(sal) & !is.na(temp) & !is.na(alk) & !is.na(ph), dic := carb(flag = 8, 
+#                                                                               var1 = ph,
+#                                                                               var2 = alk_mol, 
+#                                                                               S = sal, 
+#                                                                               T = temp, 
+#                                                                               P = pressure, 
+#                                                                               Pt = 0, 
+#                                                                               Sit = 0)$DIC, by = .I]
+windat_as3[!is.na(sal) & !is.na(temp) & !is.na(alk) & !is.na(ph), dic := carb(flag = 8, 
+                                                                              var1 = ph,
+                                                                              var2 = alk_mol, 
+                                                                              S = sal, 
+                                                                              T = temp, 
+                                                                              P = pressure, 
+                                                                              Pt = 0, 
+                                                                              Sit = 0)$DIC, by = .I]
+
+windat_as3[, coords := paste0(dep_latitude, "_", dep_longitude)]
+
+# #check out the relationship
+# sal_alk <- ggplot(gr_win_as3[!is.na(sal) & !is.na(alk)], aes(x = sal, y = alk)) +
+#             geom_point(aes(color = year, shape = season)) +
+#             geom_smooth(method = "lm") +
+#             theme_bw() +
+#             labs(x = "Salinity", y = "Total Alkalinity", color = "Year") +
+#             facet_wrap(~season, nrow = 1)
+# 
+# ph_sal <- ggplot(gr_win_as3[!is.na(sal) & !is.na(ph)], aes(x = ph, y = sal)) +
+#             geom_point(aes(color = year, shape = season)) +
+#             geom_smooth(method = "lm") +
+#             theme_bw() +
+#             labs(x = "pH", y = "Salinity", color = "Year") +
+#             facet_wrap(~season, nrow = 1)
+# 
+# ph_alk <- ggplot(gr_win_as3[!is.na(alk) & !is.na(ph)], aes(x = ph, y = alk)) +
+#             geom_point(aes(color = year, shape = season)) +
+#             geom_smooth(method = "lm") +
+#             theme_bw() +
+#             labs(x = "pH", y = "Alkalinity", color = "Year") +
+#             facet_wrap(~season, nrow = 1)
+# 
+# doc_sal <- ggplot(gr_win_as3[!is.na(doc) & !is.na(sal)], aes(x = doc, y = sal)) +
+#             geom_point(aes(color = year, shape = season)) +
+#             geom_smooth(method = "lm") +
+#             theme_bw() +
+#             labs(x = "Dissolved Organic Carbon", y = "Salinity", color = "Year") +
+#             facet_wrap(~season, nrow = 1)
+# 
+# dic_sal <- ggplot(gr_win_as3[!is.na(dic) & !is.na(sal)], aes(x = dic, y = sal)) +
+#             geom_point(aes(color = year, shape = season)) +
+#             geom_smooth(method = "lm") +
+#             theme_bw() +
+#             labs(x = "Est. Dissolved Inorganic Carbon (mol/kg)", y = "Salinity", color = "Year") +
+#             facet_wrap(~season, nrow = 1)
+# 
+# gr_dic <- sal_alk / ph_sal / ph_alk / doc_sal / dic_sal + plot_layout(guides = 'collect')
+# 
+# print(gr_dic)
+
+
+```
+
+
+##Guana River
+
+```{r}
+
+sal_alk <- #ggplot(windat_as3[coords %in% wqloc_sf_gr$coords & !is.na(sal) & !is.na(alk)], aes(x = sal, y = alk)) + 
+  ggplot(windat_as3[hobs_loc == "GR" & !is.na(sal) & !is.na(alk)], aes(x = sal, y = alk)) +
+            geom_point(aes(color = year, shape = season)) +
+            geom_point(data = windat_as3[coords %in% wqloc_sf_gr$coords & !is.na(sal) & !is.na(alk)], shape = 1, color = "black", size = 4) + #These are the points actually within the Guana River below the dam; all points reflect the GRMAP boundary
+            geom_smooth(method = "lm") +
+            theme_bw() +
+            labs(x = "Salinity", y = "Total Alkalinity", color = "Year") +
+            facet_wrap(~season, nrow = 1)
+
+ph_sal <- #ggplot(windat_as3[coords %in% wqloc_sf_gr$coords & !is.na(sal) & !is.na(ph)], aes(x = ph, y = sal)) + 
+  ggplot(windat_as3[hobs_loc == "GR" & !is.na(sal) & !is.na(ph)], aes(x = ph, y = sal)) +
+            geom_point(aes(color = year, shape = season)) +
+            geom_point(data = windat_as3[coords %in% wqloc_sf_gr$coords & !is.na(sal) & !is.na(ph)], shape = 1, color = "black", size = 4) + #These are the points actually within the Guana River below the dam; all points reflect the GRMAP boundary
+            geom_smooth(method = "lm") +
+            theme_bw() +
+            labs(x = "pH", y = "Salinity", color = "Year") +
+            facet_wrap(~season, nrow = 1)
+
+ph_alk <- #ggplot(windat_as3[coords %in% wqloc_sf_gr$coords & !is.na(alk) & !is.na(ph)], aes(x = ph, y = alk)) + 
+  ggplot(windat_as3[hobs_loc == "GR" & !is.na(alk) & !is.na(ph)], aes(x = ph, y = alk)) +
+            geom_point(aes(color = year, shape = season)) +
+            geom_point(data = windat_as3[coords %in% wqloc_sf_gr$coords & !is.na(alk) & !is.na(ph)], shape = 1, color = "black", size = 4) + #These are the points actually within the Guana River below the dam; all points reflect the GRMAP boundary
+            geom_smooth(method = "lm") +
+            theme_bw() +
+            labs(x = "pH", y = "Alkalinity", color = "Year") +
+            facet_wrap(~season, nrow = 1)
+
+doc_sal <- #ggplot(windat_as3[coords %in% wqloc_sf_gr$coords & !is.na(doc) & !is.na(sal)], aes(x = doc, y = sal)) +
+  ggplot(windat_as3[hobs_loc == "GR" & !is.na(doc) & !is.na(sal)], aes(x = doc, y = sal)) +
+            geom_point(aes(color = year, shape = season)) +
+            geom_point(data = windat_as3[coords %in% wqloc_sf_gr$coords & !is.na(doc) & !is.na(sal)], shape = 1, color = "black", size = 4) + #These are the points actually within the Guana River below the dam; all points reflect the GRMAP boundary
+            geom_smooth(method = "lm") +
+            theme_bw() +
+            labs(x = "Dissolved Organic Carbon", y = "Salinity", color = "Year") +
+            facet_wrap(~season, nrow = 1)
+
+dic_sal <- #ggplot(windat_as3[coords %in% wqloc_sf_gr$coords & !is.na(dic) & !is.na(sal)], aes(x = dic, y = sal)) + 
+  ggplot(windat_as3[hobs_loc == "GR" & !is.na(dic) & !is.na(sal)], aes(x = dic, y = sal)) +
+            geom_point(aes(color = year, shape = season)) +
+            geom_point(data = windat_as3[coords %in% wqloc_sf_gr$coords & !is.na(dic) & !is.na(sal)], shape = 1, color = "black", size = 4) + #These are the points actually within the Guana River below the dam; all points reflect the GRMAP boundary
+            geom_smooth(method = "lm") +
+            theme_bw() +
+            labs(x = "Est. Dissolved Inorganic Carbon (mol/kg)", y = "Salinity", color = "Year") +
+            facet_wrap(~season, nrow = 1)
+
+gr_dic <- sal_alk / ph_sal / ph_alk / doc_sal / dic_sal + plot_layout(guides = 'collect') + plot_annotation(title = "Guana River Marsh AP", subtitle = "Circled data points come from stations within the undammed portion of the Guana River.")
+
+# print(gr_dic)
+
+```
+
+
+##Apalachicola Bay
+
+```{r}
+
+sal_alk <- ggplot(windat_as3[hobs_loc == "ApalachicolaBay" & !is.na(sal) & !is.na(alk)], aes(x = sal, y = alk)) +
+            geom_point(aes(color = year, shape = season)) +
+            geom_smooth(method = "lm") +
+            theme_bw() +
+            labs(x = "Salinity", y = "Total Alkalinity", color = "Year") +
+            facet_wrap(~season, nrow = 1)
+
+ph_sal <- ggplot(windat_as3[hobs_loc == "ApalachicolaBay" & !is.na(sal) & !is.na(ph)], aes(x = ph, y = sal)) +
+            geom_point(aes(color = year, shape = season)) +
+            geom_smooth(method = "lm") +
+            theme_bw() +
+            labs(x = "pH", y = "Salinity", color = "Year") +
+            facet_wrap(~season, nrow = 1)
+
+ph_alk <- ggplot(windat_as3[hobs_loc == "ApalachicolaBay" & !is.na(alk) & !is.na(ph)], aes(x = ph, y = alk)) +
+            geom_point(aes(color = year, shape = season)) +
+            geom_smooth(method = "lm") +
+            theme_bw() +
+            labs(x = "pH", y = "Alkalinity", color = "Year") +
+            facet_wrap(~season, nrow = 1)
+
+#There are no DOC observations for Apalachicola Bay
+# doc_sal <- ggplot(windat_as3[hobs_loc == "ApalachicolaBay" & !is.na(doc) & !is.na(sal)], aes(x = doc, y = sal)) +
+#             geom_point(aes(color = year, shape = season)) +
+#             geom_smooth(method = "lm") +
+#             theme_bw() +
+#             labs(x = "Dissolved Organic Carbon", y = "Salinity", color = "Year") +
+#             facet_wrap(~season, nrow = 1)
+
+dic_sal <- ggplot(windat_as3[hobs_loc == "ApalachicolaBay" & !is.na(dic) & !is.na(sal)], aes(x = dic, y = sal)) +
+            geom_point(aes(color = year, shape = season)) +
+            geom_smooth(method = "lm") +
+            theme_bw() +
+            labs(x = "Est. Dissolved Inorganic Carbon (mol/kg)", y = "Salinity", color = "Year") +
+            facet_wrap(~season, nrow = 1)
+
+ab_dic <- sal_alk / ph_sal / ph_alk / plot_spacer() / dic_sal + plot_layout(guides = 'collect') + plot_annotation(title = "Apalachicola Bay")
+
+# print(ab_dic)
+
+```
+
+
+##Lone Cabbage
+
+```{r}
+
+sal_alk <- ggplot(windat_as3[hobs_loc == "LC" & !is.na(sal) & !is.na(alk)], aes(x = sal, y = alk)) +
+            geom_point(aes(color = year, shape = season)) +
+            geom_smooth(method = "lm") +
+            theme_bw() +
+            labs(x = "Salinity", y = "Total Alkalinity", color = "Year") +
+            facet_wrap(~season, nrow = 1)
+
+ph_sal <- ggplot(windat_as3[hobs_loc == "LC" & !is.na(sal) & !is.na(ph)], aes(x = ph, y = sal)) +
+            geom_point(aes(color = year, shape = season)) +
+            geom_smooth(method = "lm") +
+            theme_bw() +
+            labs(x = "pH", y = "Salinity", color = "Year") +
+            facet_wrap(~season, nrow = 1)
+
+ph_alk <- ggplot(windat_as3[hobs_loc == "LC" & !is.na(alk) & !is.na(ph)], aes(x = ph, y = alk)) +
+            geom_point(aes(color = year, shape = season)) +
+            geom_smooth(method = "lm") +
+            theme_bw() +
+            labs(x = "pH", y = "Alkalinity", color = "Year") +
+            facet_wrap(~season, nrow = 1)
+
+#There are no DOC observations for Lone Cabbage
+# doc_sal <- ggplot(windat_as3[hobs_loc == "LC" & !is.na(doc) & !is.na(sal)], aes(x = doc, y = sal)) +
+#             geom_point(aes(color = year, shape = season)) +
+#             geom_smooth(method = "lm") +
+#             theme_bw() +
+#             labs(x = "Dissolved Organic Carbon", y = "Salinity", color = "Year") +
+#             facet_wrap(~season, nrow = 1)
+
+dic_sal <- ggplot(windat_as3[hobs_loc == "LC" & !is.na(dic) & !is.na(sal)], aes(x = dic, y = sal)) +
+            geom_point(aes(color = year, shape = season)) +
+            geom_smooth(method = "lm") +
+            theme_bw() +
+            labs(x = "Est. Dissolved Inorganic Carbon (mol/kg)", y = "Salinity", color = "Year") +
+            facet_wrap(~season, nrow = 1)
+
+lc_dic <- sal_alk / ph_sal / ph_alk / plot_spacer() / dic_sal + plot_layout(guides = 'collect') + plot_annotation(title = "Lone Cabbage")
+
+# print(lc_dic)
+
+```
+
+
+##Lemon Bay
+
+```{r}
+
+#There is only one observation for alkalinity from Lemon Bay AP and it does not have a corresponding salinity value
+# sal_alk <- ggplot(windat_as3[hobs_loc == "LBAP" & !is.na(sal) & !is.na(alk)], aes(x = sal, y = alk)) +
+#             geom_point(aes(color = year, shape = season)) +
+#             geom_smooth(method = "lm") +
+#             theme_bw() +
+#             labs(x = "Salinity", y = "Total Alkalinity", color = "Year") +
+#             facet_wrap(~season, nrow = 1)
+
+ph_sal <- ggplot(windat_as3[hobs_loc == "LBAP" & !is.na(sal) & !is.na(ph)], aes(x = ph, y = sal)) +
+            geom_point(aes(color = year, shape = season)) +
+            geom_smooth(method = "lm") +
+            theme_bw() +
+            labs(x = "pH", y = "Salinity", color = "Year") +
+            facet_wrap(~season, nrow = 1)
+
+ph_alk <- ggplot(windat_as3[hobs_loc == "LBAP" & !is.na(alk) & !is.na(ph)], aes(x = ph, y = alk)) +
+            geom_point(aes(color = year, shape = season)) +
+            geom_smooth(method = "lm") +
+            theme_bw() +
+            labs(x = "pH", y = "Alkalinity", color = "Year") +
+            facet_wrap(~season, nrow = 1)
+
+#There are no DOC observations for the Lemon Bay locality
+# doc_sal <- ggplot(windat_as3[hobs_loc == "LBAP" & !is.na(doc) & !is.na(sal)], aes(x = doc, y = sal)) +
+#             geom_point(aes(color = year, shape = season)) +
+#             geom_smooth(method = "lm") +
+#             theme_bw() +
+#             labs(x = "Dissolved Organic Carbon", y = "Salinity", color = "Year") +
+#             facet_wrap(~season, nrow = 1)
+
+#DIC could not be calculated for the Lemon Bay locality
+# dic_sal <- ggplot(windat_as3[hobs_loc == "LBAP" & !is.na(dic) & !is.na(sal)], aes(x = dic, y = sal)) +
+#             geom_point(aes(color = year, shape = season)) +
+#             geom_smooth(method = "lm") +
+#             theme_bw() +
+#             labs(x = "Est. Dissolved Inorganic Carbon (mol/kg)", y = "Salinity", color = "Year") +
+#             facet_wrap(~season, nrow = 1)
+
+lb_dic <- plot_spacer() / ph_sal / ph_alk / plot_spacer() / plot_spacer() + plot_layout(guides = 'collect') + plot_annotation(title = "Lemon Bay AP")
+
+# print(lb_dic)
+
+```
+
+
+##Estero Bay
+
+```{r}
+
+sal_alk <- ggplot(windat_as3[hobs_loc == "EBAP" & !is.na(sal) & !is.na(alk)], aes(x = sal, y = alk)) +
+            geom_point(aes(color = year, shape = season)) +
+            geom_smooth(method = "lm") +
+            theme_bw() +
+            labs(x = "Salinity", y = "Total Alkalinity", color = "Year") +
+            facet_wrap(~season, nrow = 1)
+
+ph_sal <- ggplot(windat_as3[hobs_loc == "EBAP" & !is.na(sal) & !is.na(ph)], aes(x = ph, y = sal)) +
+            geom_point(aes(color = year, shape = season)) +
+            geom_smooth(method = "lm") +
+            theme_bw() +
+            labs(x = "pH", y = "Salinity", color = "Year") +
+            facet_wrap(~season, nrow = 1)
+
+ph_alk <- ggplot(windat_as3[hobs_loc == "EBAP" & !is.na(alk) & !is.na(ph)], aes(x = ph, y = alk)) +
+            geom_point(aes(color = year, shape = season)) +
+            geom_smooth(method = "lm") +
+            theme_bw() +
+            labs(x = "pH", y = "Alkalinity", color = "Year") +
+            facet_wrap(~season, nrow = 1)
+
+#There are no DOC observations for the Lemon Bay locality
+# doc_sal <- ggplot(windat_as3[hobs_loc == "EBAP" & !is.na(doc) & !is.na(sal)], aes(x = doc, y = sal)) +
+#             geom_point(aes(color = year, shape = season)) +
+#             geom_smooth(method = "lm") +
+#             theme_bw() +
+#             labs(x = "Dissolved Organic Carbon", y = "Salinity", color = "Year") +
+#             facet_wrap(~season, nrow = 1)
+
+dic_sal <- ggplot(windat_as3[hobs_loc == "EBAP" & !is.na(dic) & !is.na(sal)], aes(x = dic, y = sal)) +
+            geom_point(aes(color = year, shape = season)) +
+            geom_smooth(method = "lm") +
+            theme_bw() +
+            labs(x = "Est. Dissolved Inorganic Carbon (mol/kg)", y = "Salinity", color = "Year") +
+            facet_wrap(~season, nrow = 1)
+
+ebap_dic <- sal_alk / ph_sal / ph_alk / plot_spacer() / dic_sal + plot_layout(guides = 'collect') + plot_annotation(title = "Estero Bay AP")
+
+# print(ebap_dic)
+
+```
+
+
+##Jack Island
+
+```{r}
+
+sal_alk <- ggplot(windat_as3[hobs_loc == "JI" & !is.na(sal) & !is.na(alk)], aes(x = sal, y = alk)) +
+            geom_point(aes(color = year, shape = season)) +
+            geom_smooth(method = "lm") +
+            theme_bw() +
+            labs(x = "Salinity", y = "Total Alkalinity", color = "Year") +
+            facet_wrap(~season, nrow = 1)
+
+ph_sal <- ggplot(windat_as3[hobs_loc == "JI" & !is.na(sal) & !is.na(ph)], aes(x = ph, y = sal)) +
+            geom_point(aes(color = year, shape = season)) +
+            geom_smooth(method = "lm") +
+            theme_bw() +
+            labs(x = "pH", y = "Salinity", color = "Year") +
+            facet_wrap(~season, nrow = 1)
+
+ph_alk <- ggplot(windat_as3[hobs_loc == "JI" & !is.na(alk) & !is.na(ph)], aes(x = ph, y = alk)) +
+            geom_point(aes(color = year, shape = season)) +
+            geom_smooth(method = "lm") +
+            theme_bw() +
+            labs(x = "pH", y = "Alkalinity", color = "Year") +
+            facet_wrap(~season, nrow = 1)
+
+doc_sal <- ggplot(windat_as3[hobs_loc == "JI" & !is.na(doc) & !is.na(sal)], aes(x = doc, y = sal)) +
+            geom_point(aes(color = year, shape = season)) +
+            geom_smooth(method = "lm") +
+            theme_bw() +
+            labs(x = "Dissolved Organic Carbon", y = "Salinity", color = "Year") +
+            facet_wrap(~season, nrow = 1)
+
+dic_sal <- ggplot(windat_as3[hobs_loc == "JI" & !is.na(dic) & !is.na(sal)], aes(x = dic, y = sal)) +
+            geom_point(aes(color = year, shape = season)) +
+            geom_smooth(method = "lm") +
+            theme_bw() +
+            labs(x = "Est. Dissolved Inorganic Carbon (mol/kg)", y = "Salinity", color = "Year") +
+            facet_wrap(~season, nrow = 1)
+
+ji_dic <- sal_alk / ph_sal / ph_alk / doc_sal / dic_sal + plot_layout(guides = 'collect') + plot_annotation(title = "Jack Island")
+
+# print(ji_dic)
+
+```
+
+
+##Pellicer Creek
+
+```{r}
+
+sal_alk <- ggplot(windat_as3[hobs_loc == "PC" & !is.na(sal) & !is.na(alk)], aes(x = sal, y = alk)) +
+            geom_point(aes(color = year, shape = season)) +
+            geom_smooth(method = "lm") +
+            theme_bw() +
+            labs(x = "Salinity", y = "Total Alkalinity", color = "Year") +
+            facet_wrap(~season, nrow = 1)
+
+ph_sal <- ggplot(windat_as3[hobs_loc == "PC" & !is.na(sal) & !is.na(ph)], aes(x = ph, y = sal)) +
+            geom_point(aes(color = year, shape = season)) +
+            geom_smooth(method = "lm") +
+            theme_bw() +
+            labs(x = "pH", y = "Salinity", color = "Year") +
+            facet_wrap(~season, nrow = 1)
+
+ph_alk <- ggplot(windat_as3[hobs_loc == "PC" & !is.na(alk) & !is.na(ph)], aes(x = ph, y = alk)) +
+            geom_point(aes(color = year, shape = season)) +
+            geom_smooth(method = "lm") +
+            theme_bw() +
+            labs(x = "pH", y = "Alkalinity", color = "Year") +
+            facet_wrap(~season, nrow = 1)
+
+doc_sal <- ggplot(windat_as3[hobs_loc == "PC" & !is.na(doc) & !is.na(sal)], aes(x = doc, y = sal)) +
+            geom_point(aes(color = year, shape = season)) +
+            geom_smooth(method = "lm") +
+            theme_bw() +
+            labs(x = "Dissolved Organic Carbon", y = "Salinity", color = "Year") +
+            facet_wrap(~season, nrow = 1)
+
+dic_sal <- ggplot(windat_as3[hobs_loc == "PC" & !is.na(dic) & !is.na(sal)], aes(x = dic, y = sal)) +
+            geom_point(aes(color = year, shape = season)) +
+            geom_smooth(method = "lm") +
+            theme_bw() +
+            labs(x = "Est. Dissolved Inorganic Carbon (mol/kg)", y = "Salinity", color = "Year") +
+            facet_wrap(~season, nrow = 1)
+
+pc_dic <- sal_alk / ph_sal / ph_alk / doc_sal / dic_sal + plot_layout(guides = 'collect') + plot_annotation(title = "Pellicer Creek")
+
+# print(pc_dic)
+
+```
+
+
+##Matanzas River
+
+```{r}
+
+sal_alk <- ggplot(windat_as3[hobs_loc == "MR" & !is.na(sal) & !is.na(alk)], aes(x = sal, y = alk)) +
+            geom_point(aes(color = year, shape = season)) +
+            geom_smooth(method = "lm") +
+            theme_bw() +
+            labs(x = "Salinity", y = "Total Alkalinity", color = "Year") +
+            facet_wrap(~season, nrow = 1)
+
+ph_sal <- ggplot(windat_as3[hobs_loc == "MR" & !is.na(sal) & !is.na(ph)], aes(x = ph, y = sal)) +
+            geom_point(aes(color = year, shape = season)) +
+            geom_smooth(method = "lm") +
+            theme_bw() +
+            labs(x = "pH", y = "Salinity", color = "Year") +
+            facet_wrap(~season, nrow = 1)
+
+ph_alk <- ggplot(windat_as3[hobs_loc == "MR" & !is.na(alk) & !is.na(ph)], aes(x = ph, y = alk)) +
+            geom_point(aes(color = year, shape = season)) +
+            geom_smooth(method = "lm") +
+            theme_bw() +
+            labs(x = "pH", y = "Alkalinity", color = "Year") +
+            facet_wrap(~season, nrow = 1)
+
+doc_sal <- ggplot(windat_as3[hobs_loc == "MR" & !is.na(doc) & !is.na(sal)], aes(x = doc, y = sal)) +
+            geom_point(aes(color = year, shape = season)) +
+            geom_smooth(method = "lm") +
+            theme_bw() +
+            labs(x = "Dissolved Organic Carbon", y = "Salinity", color = "Year") +
+            facet_wrap(~season, nrow = 1)
+
+dic_sal <- ggplot(windat_as3[hobs_loc == "MR" & !is.na(dic) & !is.na(sal)], aes(x = dic, y = sal)) +
+            geom_point(aes(color = year, shape = season)) +
+            geom_smooth(method = "lm") +
+            theme_bw() +
+            labs(x = "Est. Dissolved Inorganic Carbon (mol/kg)", y = "Salinity", color = "Year") +
+            facet_wrap(~season, nrow = 1)
+
+mr_dic <- sal_alk / ph_sal / ph_alk / doc_sal / dic_sal + plot_layout(guides = 'collect') + plot_annotation(title = "Matanzas River")
+
+# print(mr_dic)
+
+```
+
+
+
+```{r}
+for(p in c("gr_dic", "ab_dic", "lc_dic", "lb_dic", "ebap_dic", "ji_dic", "pc_dic", "mr_dic")){
+ggsave(filename = here::here(paste0("CalCurve/Carbon_plots/", p, "_", Sys.Date(), ".png")),
+       plot = get(p),
+       width = 8,
+       height = 10.5,
+       units = "in",
+       dpi = 300)  
+}
+
+```
+
+
+
+# DIC ~ Sal Model
+ChatGPT 5.2 suggested that plotting residuals of DIC ~ Salinity relationship against DOC and alkalinity would be informative, so I try that here.
+
+First, need a more polished model of DIC ~ Salinity.
+
+```{r}
+
+#Scale and center the variables
+# gr_win_as3[!is.na(dic), `:=` (sal_sc = ((sal - min(sal)) - diff(range(sal))/2)/100,
+#                               dic_sc = ((dic - min(dic)) - diff(range(dic))/2))]
+windat_as3[!is.na(dic), `:=` (sal_sc = ((sal - min(sal)) - diff(range(sal))/2)/100,
+                              dic_sc = ((dic - min(dic)) - diff(range(dic))/2))]
+
+ggplot(windat_as3[!is.na(dic) & !is.na(sal), ]) +
+  geom_point(aes(x = sal, y = dic, color = year)) +
+  geom_smooth(aes(x = sal, y = dic), method = "lm") +
+  theme_bw() +
+  facet_wrap(~hobs_loc)
+
+# dicsalmod_ppc <- brm(dic_sc ~ sal_sc + (1 + sal_sc | season) + (1 | year),
+#                      family = gaussian(),
+#                      prior = set_prior("normal(0, 1)", class = "b"),
+#                      data = gr_win_as3[!is.na(sal) & !is.na(dic), ], 
+#                      cores = 4, 
+#                      seed = 456, 
+#                      chains = 4, 
+#                      iter = 5000, 
+#                      warmup = 1500, 
+#                      control = list(adapt_delta = 0.9, 
+#                                     max_treedepth = 12),
+#                      sample_prior = "only",
+#                      backend = "cmdstanr", 
+#                      threads = threading(2)
+#                      )
+# 
+# dicsalmod <- brm(dic_sc ~ sal_sc + (1 + sal_sc | season) + (1 | year),
+#                  family = gaussian(),
+#                  prior = set_prior("normal(0, 1)", class = "b"),
+#                  data = gr_win_as3[!is.na(sal) & !is.na(dic), ], 
+#                  cores = 4, 
+#                  seed = 456, 
+#                  chains = 4, 
+#                  iter = 5000, 
+#                  warmup = 1500, 
+#                  control = list(adapt_delta = 0.9, 
+#                                 max_treedepth = 12), 
+#                  backend = "cmdstanr", 
+#                  threads = threading(2)
+#                  )
+# dicsalmod <- add_criterion(dicsalmod, "loo")
+# 
+# 
+# dicsalmod_log_ppc <- brm(log(dic) ~ log(sal) + (1 + log(sal) | season) + (1 | year),
+#                          family = gaussian(),
+#                          prior = c(set_prior("normal(0, 0.05)", class = "b"),
+#                                    set_prior("exponential(1)", class = "sd")),
+#                          data = gr_win_as3[!is.na(sal) & !is.na(dic), ], 
+#                          cores = 4, 
+#                          seed = 456, 
+#                          chains = 4, 
+#                          iter = 5000, 
+#                          warmup = 1500, 
+#                          control = list(adapt_delta = 0.9, 
+#                                         max_treedepth = 12),
+#                          sample_prior = "only",
+#                          backend = "cmdstanr", 
+#                          threads = threading(2)
+#                          )
+# 
+# dicsalmod_log <- brm(log(dic) ~ log(sal) + (1 + log(sal) | season) + (1 | year),
+#                      family = gaussian(),
+#                      prior = c(set_prior("normal(0, 0.05)", class = "b"),
+#                                set_prior("exponential(1)", class = "sd")),
+#                      data = gr_win_as3[!is.na(sal) & !is.na(dic), ], 
+#                      cores = 4, 
+#                      seed = 456, 
+#                      chains = 4, 
+#                      iter = 5000, 
+#                      warmup = 1500, 
+#                      control = list(adapt_delta = 0.9, 
+#                                     max_treedepth = 12), 
+#                      backend = "cmdstanr", 
+#                      threads = threading(2)
+#                      )
+# dicsalmod_log <- add_criterion(dicsalmod_log, "loo")
+# 
+# 
+# dicsalmod2 <- brm(dic ~ scale(sal) + (1 + scale(sal) | season) + (1 | year),
+#                   family = student(),
+#                   prior = c(
+#                     prior(student_t(3, 0, 1), class = "b"),
+#                     prior(student_t(3, 0, 1), class = "sd"),
+#                     prior(exponential(1), class = "nu")),
+#                   data = gr_win_as3[!is.na(sal) & !is.na(dic), ], 
+#                   cores = 4, 
+#                   seed = 456, 
+#                   chains = 4, 
+#                   iter = 5000, 
+#                   warmup = 1500, 
+#                   control = list(adapt_delta = 0.9, 
+#                                  max_treedepth = 12), 
+#                   backend = "cmdstanr", 
+#                   threads = threading(2)
+#                  )
+# dicsalmod2 <- add_criterion(dicsalmod2, "loo")
+# 
+# 
+# dicsalmod_skew <- brm(dic ~ scale(sal) + (1 + scale(sal) | season) + (1 | year),
+#                       family = skew_normal(),
+#                       data = gr_win_as3[!is.na(sal) & !is.na(dic), ], 
+#                       cores = 4, 
+#                       seed = 456, 
+#                       chains = 4, 
+#                       iter = 5000, 
+#                       warmup = 1500, 
+#                       control = list(adapt_delta = 0.9, 
+#                                      max_treedepth = 12), 
+#                       backend = "cmdstanr", 
+#                       threads = threading(2)
+#                      )
+# dicsalmod_skew <- add_criterion(dicsalmod_skew, "loo")
+
+#Try modeling sigma by season (suggestion by ChatGPT 5.2)
+dicsalmod_skew2 <- brm(bf(dic ~ scale(sal) + (1 + scale(sal) | season) + (1 | year),
+                          sigma ~ season),
+                      family = skew_normal(),
+                      data = gr_win_as3[!is.na(sal) & !is.na(dic), ], 
+                      cores = 4, 
+                      seed = 456, 
+                      chains = 4, 
+                      iter = 5000, 
+                      warmup = 1500, 
+                      control = list(adapt_delta = 0.9, 
+                                     max_treedepth = 12), 
+                      backend = "cmdstanr", 
+                      threads = threading(2),
+                      file = here::here("dicsalmod_skew2.rds"))
+dicsalmod_skew2 <- add_criterion(dicsalmod_skew2, "loo", moment_match = T)
+
+
+# loo_compare(dicsalmod, dicsalmod2, dicsalmod_log, dicsalmod_skew, dicsalmod_skew2) #skew2 model fits best by a hair according to loo, and looks best in terms of ppc - stick with it.
+
+
+```
+
+Now extract the sigma draws and plot them by season.
+
+```{r}
+sigmadraws <- as_draws_df(dicsalmod_skew2, "^b_sigma", regex = T)
+setDT(sigmadraws)
+
+#calculate sigma values by season
+sigmadraws[, `:=` (sigma_sp = exp(b_sigma_Intercept),
+                   sigma_su = exp(b_sigma_Intercept + b_sigma_seasonSu),
+                   sigma_fa = exp(b_sigma_Intercept + b_sigma_seasonF),
+                   sigma_wi = exp(b_sigma_Intercept + b_sigma_seasonW))]
+
+ggplot(sigmadraws) + 
+  geom_histogram(aes(x = sigma_su, fill = "sigma_su")) + 
+  geom_histogram(aes(x = sigma_sp, fill = "sigma_sp"), alpha = 0.5) +
+  geom_histogram(aes(x = sigma_fa, fill = "sigma_fa"), alpha = 0.5) + 
+  geom_histogram(aes(x = sigma_wi, fill = "sigma_wi"), alpha = 0.5) + 
+  scale_fill_manual(values = c("sigma_su" = "red", "sigma_fa" = "navy", "sigma_wi" = "dodgerblue", "sigma_sp" = "blue")) + 
+  theme_bw() + 
+  labs(x = "b_sigma", fill = NULL)
+
+
+```
+
+Now, calculate the probabilities that summer variability is greater than each of the other seasons.
+```{r}
+c(sigmadraws[, mean(sigma_su > sigma_sp)],
+  sigmadraws[, mean(sigma_su > sigma_fa)],
+  sigmadraws[, mean(sigma_su > sigma_wi)])
+
+```
+
+Indicates that the seasons, in order of increasing variability in DIC, are spring < summer < winter < fall. ChatGPT 5.2 suggests using these results to calculate "F14C envelopes" by season. We focus on the positive residuals because the weighted mean living oyster F14C from Guana River was lower than the calibration curve reference value (i.e., DIC with "older" F14C than the marine endmember must have been added to the estuary).
+
+```{r}
+#Get draws of the expected values of the posterior
+epreddraws <- posterior_epred(dicsalmod_skew2, re_formula = NULL)
+
+#Create a vector of original calculated DIC values
+yobs <- gr_win_as3[!is.na(sal) & !is.na(dic), dic]
+
+#Subtract each expected posterior draw from the corresponding actual observation-based calculated value
+residdraws <- sweep(epreddraws, 2, yobs, FUN = "-") * -1 # equivalent to: resid = y_obs - mu
+
+#Make it a data.table and add season variable
+residdraws2 <- as.data.table(residdraws)
+residdraws2 <- melt(residdraws2, measure.vars = colnames(residdraws2))
+residdraws2[, `:=` (rowid = seq(1, nrow(residdraws2)),
+                    obs_row = as.integer(str_sub(variable, 2, -1)))]
+obs_seasons <- gr_win_as3[!is.na(sal) & !is.na(dic), .(year, season, doc, alk, alk_mol), by = .I]
+obs_seasons[, obs_row := seq(1, nrow(obs_seasons))]
+residdraws3 <- merge(residdraws2, obs_seasons, by = "obs_row", all.x = T)
+
+#Extract the positive delta-DIC residual values and summarize
+posresid <- copy(residdraws3[value > 0, ])
+posresid_sum <- posresid[, .(med = median(value),
+                             q90 = quantile(value, 0.9),
+                             q95 = quantile(value, 0.95)), by = season]
+posresid_sum[, season2 := factor(season, levels = c("Sp", "Su", "F", "W"))]
+
+#Plot them
+ggplot(posresid_sum) +
+  geom_line(aes(x = season2, y = med, group = 1, color = "med")) +
+  geom_point(aes(x = season2, y = med, color = "med")) +
+  geom_line(aes(x = season2, y = q90, group = 1, color = "q90")) +
+  geom_point(aes(x = season2, y = q90, color = "q90")) +
+  geom_line(aes(x = season2, y = q95, group = 1, color = "q95")) +
+  geom_point(aes(x = season2, y = q95, color = "q95")) +
+  theme_bw() +
+  labs(x = "season", y = "delta DIC | delta DIC > 0", color = "metric")
+
+```
+
+Results change when not restricting the residuals analysis to positive values. I'm not certain this was good advice from ChatGPT because the resulting F14C is a product of both positive and negative residuals, not just the positive ones (i.e., we have no reason to believe the oysters are only growing during periods of higher-than-usual DIC; just that the measured F14C is lower than the marine expectation). 
+
+***Copied from later in the document: [I also asked a clarifying question about the focus on positive DIC residuals and ChatGPT explained that delta DIC only controls DIC concentration; processes which remove DIC from the estuary (i.e., producing negative residuals) cannot bias F14C. Only additions of isotopically distinct DIC can result in biases to F14C shell, so that is the rationale for focusing on only the positive residuals when evaluating the potential biases to shell F14C.]
+
+```{r}
+resid_sum <- residdraws3[, .(med = median(value),
+                             q90 = quantile(value, 0.9),
+                             q95 = quantile(value, 0.95)), by = season]
+
+resid_sum[, season2 := factor(season, levels = c("Sp", "Su", "F", "W"))]
+
+ggplot(resid_sum) +
+  geom_line(aes(x = season2, y = med, group = 1, color = "med")) +
+  geom_point(aes(x = season2, y = med, color = "med")) +
+  geom_line(aes(x = season2, y = q90, group = 1, color = "q90")) +
+  geom_point(aes(x = season2, y = q90, color = "q90")) +
+  geom_line(aes(x = season2, y = q95, group = 1, color = "q95")) +
+  geom_point(aes(x = season2, y = q95, color = "q95")) +
+  theme_bw() +
+  labs(x = "season", y = "delta DIC", color = "metric")
+
+
+```
+
+Let's try the same sort of histograms on the residuals that I used for the sigma draws.
+
+```{r}
+
+ggplot(residdraws3) + 
+  geom_vline(xintercept = 0) +
+  geom_histogram(data = residdraws3[season == "Su", ], aes(x = value, fill = "summer"), alpha = 0.8) + 
+  geom_histogram(data = residdraws3[season == "Sp", ], aes(x = value, fill = "spring"), alpha = 0.8) +
+  geom_histogram(data = residdraws3[season == "F", ], aes(x = value, fill = "fall"), alpha = 0.8) + 
+  geom_histogram(data = residdraws3[season == "W", ], aes(x = value, fill = "winter"), alpha = 0.8) + 
+  scale_fill_manual(values = c("summer" = "red", "fall" = "navy", "winter" = "dodgerblue", "spring" = "blue")) + 
+  theme_bw() + 
+  labs(x = "residual DIC", fill = NULL) +
+  facet_wrap(~season)
+
+```
+
+It's clear why the median fall value goes down when all residuals are considered; there is a long negative tail.
+What happens if I weight the seasonal medians by their relative seasonal growth potentials?
+
+```{r}
+env_d_yr90[gr50_inc == TRUE, `:=` (gr_spat_dp = (gr_spat_d + abs(gr_spat_d))/sum(gr_spat_d + abs(gr_spat_d)),
+                                   gr_seed_dp = (gr_seed_d + abs(gr_seed_d))/sum(gr_seed_d + abs(gr_seed_d)),
+                                   gr_sack_dp = (gr_sack_d + abs(gr_sack_d))/sum(gr_sack_d + abs(gr_sack_d)))]
+
+test <- unique(env_d_yr90[gr50_inc == TRUE, .(gr_sack_dp_med = median(gr_sack_dp)), by = list(day, season)])
+
+ggplot(test) + #unique(env_d_yr90[gr50_inc == TRUE, .(gr_sack_dp_med = median(gr_sack_dp)), by = list(day, season)])
+  geom_point(aes(x = day, y = gr_sack_dp_med, color = season)) +
+  theme_bw()
+
+```
+
+
+Let's try creating the plots recommended by ChatGPT earlier (i.e., residuals vs. DOC and Alk)
+
+```{r}
+resid_sum2 <- residdraws3[!is.na(value) & !is.na(doc) & !is.na(alk) & !is.na(alk_mol), 
+                          .(resid_med = median(value),
+                            resid_q90 = quantile(value, 0.9),
+                            resid_q95 = quantile(value, 0.95),
+                            doc_med = median(doc),
+                            alk_med = median(alk),
+                            alk_mol_med = median(alk_mol)), by = list(year, season)]
+
+resid_sum2[, season2 := factor(season, levels = c("Sp", "Su", "F", "W"))]
+
+dic_alk <- ggplot(resid_sum2) +
+              geom_point(aes(x = resid_med, y = alk_med), color = "dodgerblue") +
+              theme_bw() +
+              labs(x = "Median delta DIC", y = "Median TA") +
+              facet_wrap(~season2, ncol = 1)
+
+dic_doc <- ggplot(resid_sum2) +
+              geom_point(aes(x = resid_med, y = doc_med), color = "firebrick") +
+              theme_bw() +
+              labs(x = "Median delta DIC", y = "Median DOC") +
+              facet_wrap(~season2, ncol = 1)
+
+dic_alk + dic_doc + plot_layout(guides = "collect")
+
+
+
+```
+
+There appears to be some relationship between residual DIC and TA, but not really any discernible relationship between residual DIC and DOC based on these plots. ChatGPT suggests this result makes sense:
+
+"A relationship with TA suggests that residual DIC is linked to processes that:
+- affect the carbonate system, not just organic matter supply.
+
+Candidates include:
+- carbonate dissolution / re-equilibration in sediments
+- porewater exchange involving bicarbonate
+- alkalinity-generating anaerobic processes (sulfate reduction, denitrification)
+- shifts in buffering capacity that modulate how CO₂ addition/removal manifests as DIC
+
+These processes:
+- can change DIC and TA together locally,
+- but still average out to a conservative TA–salinity relationship at the estuary scale.
+
+[...]
+
+Why the lack of a residual–DOC relationship is not surprising
+
+This is the part that often trips people up, so it’s worth being explicit.
+
+DOC controls:
+- substrate availability for respiration,
+- not the instantaneous DIC anomaly you measure.
+
+Reasons you would not expect a tight residual–DOC relationship:
+1. DOC is a stock
+- ΔDIC is a flux outcome. High DOC does not guarantee high respiration at that moment.
+
+2. Time lags matter
+- DOC delivered during storms may be respired days–weeks later, possibly elsewhere.
+
+3. Multiple DOC fates
+- export
+- burial
+- photodegradation
+- microbial uptake with varying efficiency
+
+4. Opposing processes coexist
+- respiration adds DIC
+- gas exchange removes it
+- flushing exports it
+
+So DOC sets the potential for DIC production, not the realized residual at a given sampling time."
+
+
+I also asked a clarifying question about the focus on positive DIC residuals and ChatGPT explained that delta DIC only controls DIC concentration; processes which remove DIC from the estuary (i.e., producing negative residuals) cannot bias F14C. Only additions of isotopically distinct DIC can result in biases to F14C shell, so that is the rationale for focusing on only the positive residuals when evaluating the potential biases to shell F14C.
+
+
+#Deterministic Surface Model
+
+Here is how ChatGPT 5.2 recommended implementing these analyses to modify my initial mixing surface approach:
+
+"Option 1 (recommended): Conservative mixing surface + additive non-conservative DIC term
+Step 1 — Baseline (conservative) DIC and F¹⁴C mixing
+
+Define freshwater fraction from salinity:
+
+𝑓𝑠𝑤(𝑆)=𝑆/35, 𝑓𝑓𝑤(𝑆)=1−𝑆/35
+
+Choose endmembers:
+
+𝐶𝑠𝑤(𝑡): marine DIC (can be treated as constant ~2.0–2.2 mM or allowed to vary weakly by year if you want)
+
+𝐹𝑠𝑤(𝑡): marine DIC F¹⁴C time series (from your regional marine curve)
+
+𝐶𝑓𝑤: “all-source freshwater DIC” (not rainwater; estimate from low-salinity end of your computed DIC or from TA+pH carbonate system)
+
+𝐹𝑓𝑤(𝑡): F¹⁴C of that freshwater carbon (often near modern for soil/marsh CO₂, but you can bound it)
+
+Conservative mixed DIC:
+
+𝐶mix(𝑆,𝑡)=𝑓𝑠𝑤𝐶𝑠𝑤(𝑡) +𝑓𝑓𝑤𝐶𝑓𝑤
+
+Conservative mixed F¹⁴C (DIC-weighted):
+
+𝐹mix(𝑆,𝑡) = (𝑓𝑠𝑤 * 𝐶𝑠𝑤(𝑡) * 𝐹𝑠𝑤(𝑡) +𝑓𝑓𝑤 * 𝐶𝑓𝑤 * 𝐹𝑓𝑤(𝑡)) / 𝐶mix(𝑆,𝑡)
+
+That gives you a clean Salinity × Year baseline surface.
+
+
+Step 2 — Add the missing term as ΔC, not Δwater
+
+Your residual analysis produced a distribution of positive non-conservative additions:
+
+Δ𝐶+ ∼ (from your posterior residuals)
+
+Now define a season/year‐dependent expected (or quantile) addition:
+
+Δ𝐶50(𝑠𝑒𝑎𝑠𝑜𝑛), Δ𝐶90(𝑠𝑒𝑎𝑠𝑜𝑛), etc.
+(from your posterior residual summary)
+
+Then:
+
+𝐹est(𝑆,𝑡,𝑠𝑒𝑎𝑠𝑜𝑛) = (𝐶mix * 𝐹mix + Δ𝐶(𝑠𝑒𝑎𝑠𝑜𝑛,𝑡) * 𝐹𝑛𝑐) / (𝐶mix + Δ𝐶(𝑠𝑒𝑎𝑠𝑜𝑛,𝑡))
+
+Where 𝐹𝑛𝑐 is the F¹⁴C of the added carbon:
+
+If it’s mostly porewater/respired DIC that’s slightly old: try 𝐹𝑛𝑐 ≈ 0.6 as a depleted scenario.
+
+If it’s “dead” carbonate: 𝐹𝑛𝑐 = 0 (likely too extreme for Guana given your TA story and live shells, but useful as an upper bound).
+
+If it’s modern respiration: 𝐹𝑛𝑐 ≈ 1.0 (this would push the other direction and is a useful contrast case).
+
+This is the “full-circle” surface: it’s still a mixing surface, but now it includes the additional, post-rainfall DIC sources in exactly the way your carbonate chemistry and residual model support.
+
+What you get out of it
+
+You don’t just get one surface — you get a family:
+
+“Expected” surface: use Δ𝐶50 (or a growth-weighted average of spring/fall)
+
+“Upper bound” surface: use Δ𝐶90 (or Δ𝐶95) as a stress test
+
+“Lower bound”: 
+Δ𝐶 = 0
+
+And you can compute ΔR at each (S,t):
+
+Δ𝑅(𝑆,𝑡) = −8033 * ln(𝐹est(𝑆,𝑡) / 𝐹𝑠𝑤(𝑡))
+
+(Or equivalently compare apparent ages.)"
+
+
+
+```{r}
+
+
+#Get end-member DIC values from DIC ~ salinity model
+# dic ~ scale(sal) + (1 + scale(sal) | season) + (1 | year),
+#                           sigma ~ season)
+newdat_dic <- data.table(sal = rep(c(0, 35), each = 48),
+                         season = rep(c("Sp", "Su", "F", "W"), 24),
+                         year = factor(rep(rep(c("2012", "2013", "2016", "2017", "2018", "2019", "2020", "2021", "2022", "2023", "2024", "2025"), each = 4), 2), levels = c("2012", "2013", "2016", "2017", "2018", "2019", "2020", "2021", "2022", "2023", "2024", "2025")))
+predvals_dic <- posterior_predict(dicsalmod_skew2, newdata = newdat_dic, ndraws = 1000, allow_new_levels = TRUE)
+newcurvepreds_dic <- newdat_dic[, .(sal, season, year)]
+for(i in seq(1, nrow(newcurvepreds_dic))){
+  newcurvepreds_dic[i, `:=` (dic_mn = mean(predvals_dic[, i]),
+                             dic_sd = sd(predvals_dic[, i]))]
+}
+
+#Calculate weighted average endmember DIC values following same formulas as used for Dead C
+dic_end <- newcurvepreds_dic[, .(n = .N,
+                                 dic_mn_w = sum(dic_mn/dic_sd^2)/sum(1/dic_sd^2),
+                                 dic_sd_w = max(c(sqrt(1/sum(1/dic_sd^2)),
+                                                 sqrt((.N * sum((dic_mn - sum(dic_mn/dic_sd^2)/sum(1/dic_sd^2))^2/dic_sd^2))/((.N - 1) * sum(1/dic_sd^2)))))), by = list(sal, season)]
+
+dic_end_tot <- newcurvepreds_dic[, .(n = .N,
+                                     dic_mn_w = sum(dic_mn/dic_sd^2)/sum(1/dic_sd^2),
+                                     dic_sd_w = max(c(sqrt(1/sum(1/dic_sd^2)),
+                                                      sqrt((.N * sum((dic_mn - sum(dic_mn/dic_sd^2)/sum(1/dic_sd^2))^2/dic_sd^2))/((.N - 1) * sum(1/dic_sd^2)))))), by = list(sal)]
+dic_end_tot[, season := "All"]
+
+dic_end <- rbindlist(list(dic_end, dic_end_tot), use.names = T, fill = T)
+
+#Need yearly values for Hua atmospheric curve for the F14C_fw reference values
+hua <- curves[, .(year, f14c_hua)]
+hua[, year2 := floor(year)]
+
+hua_yr <- lapply(unique(hua$year2), function(x){
+  mn_yr <- data.table(yr = x,
+                      f14c_mn = hua[year >= x & year <= x + 1, mean(f14c_hua)],
+                      f14c_sd = hua[year >= x & year <= x + 1, sd(f14c_hua)])
+  return(mn_yr)
+})
+
+hua_yr2 <- rbindlist(hua_yr, use.names = T, fill = T)
+
+#Add reference values
+# env_d_yr90[, `:=` (f_sw = sal_med/35,
+#                    f_fw = 1 - (sal_med/35),
+#                    C_sw = dic_end[season == "All" & sal == 35, dic_mn_w],
+#                    F_sw = newcurvepreds[yr == year, f14c_mn],
+#                    F_sw_sd = newcurvepreds[yr == year, f14c_sd],
+#                    C_fw = dic_end[season == "All" & sal == 0, dic_mn_w],
+#                    F_fw = hua_yr2[yr == year, f14c_mn],
+#                    F_fw_sd = hua_yr2[yr == year, f14c_sd]), by = year]
+
+hua_yr2[, year := yr]
+hua_yr2[, yr := NULL]
+newcurvepreds[, year := yr]
+newcurvepreds[, yr := NULL]
+
+Csw <- dic_end[season == "All" & sal == 35, dic_mn_w]
+Cfw <- dic_end[season == "All" & sal == 0, dic_mn_w]
+
+byyr_v2b <- merge(byyr_v2b, newcurvepreds[year > 1950, .(year, F_sw = f14c_mn, F_sw_sd = f14c_sd)], by.x = "yr", by.y = "year", all.x = T)
+byyr_v2b <- merge(byyr_v2b, hua_yr2[, .(year, F_fw = f14c_mn, F_fw_sd = f14c_sd)], by.x = "yr", by.y = "year", all.x = T)
+
+byyr_v2b[is.na(F_sw), `:=` (F_sw = curves[year == yr, f14c_durham],
+                            F_sw_sd = curves[year == yr, f14c_durham_sd]), by = yr]
+
+byyr_v2b[, `:=` (f_sw = sal/35,
+                 f_fw = 1 - (sal/35),
+                 C_sw = Csw,
+                 # F_sw = f14c_durham, #newcurvepreds[year == yr, f14c_mn],
+                 # F_sw_sd = f14c_durham_sd, #newcurvepreds[year == yr, f14c_sd],
+                 C_fw = Cfw)]#,
+                 # F_fw = f14c_hua, #hua_yr2[year == yr, f14c_mn],
+                 # F_fw_sd = f14c_hua_sd)] #hua_yr2[year == yr, f14c_sd]), by = list(yr, sal)]
+
+#Calculate conservative mixed DIC
+env_d_yr90[, Cmix := f_sw * C_sw + f_fw * C_fw]
+byyr_v2b[, Cmix := f_sw * C_sw + f_fw * C_fw]
+
+#Calculate conservative mixed F14C (DIC-weighted)
+env_d_yr90[, Fmix := (f_sw * C_sw * F_sw + f_fw * C_fw * F_fw)/Cmix]
+byyr_v2b[, Fmix := (f_sw * C_sw * F_sw + f_fw * C_fw * F_fw)/Cmix]
+
+#Calculate season/year-dependent expected addition
+env_d_yr90[gr_sack_d >= 0, gr_sack_d2 := gr_sack_d]
+env_d_yr90[is.na(gr_sack_d2), gr_sack_d2 := 0]
+
+env_d_yr90[gr_seed_d >= 0, gr_seed_d2 := gr_seed_d]
+env_d_yr90[is.na(gr_seed_d2), gr_seed_d2 := 0]
+
+env_d_yr90[gr_spat_d >= 0, gr_spat_d2 := gr_spat_d]
+env_d_yr90[is.na(gr_spat_d2), gr_spat_d2 := 0]
+
+#Calculate normalized total growth mass in each season (utilizing "sack" totals because most dated specimens were relatively large)
+gr_s_sack <- env_d_yr90[, .(G_s_sack = sum(gr_sack_d2)), by = season]
+gr_s_sack[, w_st := G_s_sack/sum(gr_s_sack$G_s_sack)]
+
+gr_s_seed <- env_d_yr90[, .(G_s_seed = sum(gr_seed_d2)), by = season]
+gr_s_seed[, w_st := G_s_seed/sum(gr_s_seed$G_s_seed)]
+
+gr_s_spat <- env_d_yr90[, .(G_s_spat = sum(gr_spat_d2)), by = season]
+gr_s_spat[, w_st := G_s_spat/sum(gr_s_spat$G_s_spat)]
+
+#Calculate availability adjusted weight (i.e., proportion of days when >= 50% growth conditions are met)
+gr_s_sack[, sn := season]
+gr_s_sack[, p_s := env_d_yr90[season == sn, sum(gr50_inc_sack)/.N], by = sn]
+gr_s_sack[, w_s := (w_st * p_s) / sum(w_st * p_s)]
+
+gr_s_seed[, sn := season]
+gr_s_seed[, p_s := env_d_yr90[season == sn, sum(gr50_inc_seed)/.N], by = sn]
+gr_s_seed[, w_s := (w_st * p_s) / sum(w_st * p_s)]
+
+gr_s_spat[, sn := season]
+gr_s_spat[, p_s := env_d_yr90[season == sn, sum(gr50_inc_spat)/.N], by = sn]
+gr_s_spat[, w_s := (w_st * p_s) / sum(w_st * p_s)]
+
+#Calculate weighted delta C values for relevant quantiles (conditional on delta C > 0)
+gr_s_sack2 <- merge(gr_s_sack, posresid_sum, by = "season", all.x = T)
+dC50_sack <- gr_s_sack2[, sum(w_s * med)]
+dC90_sack <- gr_s_sack2[, sum(w_s * q90)]
+dC95_sack <- gr_s_sack2[, sum(w_s * q95)]
+
+gr_s_seed2 <- merge(gr_s_seed, posresid_sum, by = "season", all.x = T)
+dC50_seed <- gr_s_seed2[, sum(w_s * med)]
+dC90_seed <- gr_s_seed2[, sum(w_s * q90)]
+dC95_seed <- gr_s_seed2[, sum(w_s * q95)]
+
+gr_s_spat2 <- merge(gr_s_spat, posresid_sum, by = "season", all.x = T)
+dC50_spat <- gr_s_spat2[, sum(w_s * med)]
+dC90_spat <- gr_s_spat2[, sum(w_s * q90)]
+dC95_spat <- gr_s_spat2[, sum(w_s * q95)]
+
+
+#ChatGPT also suggested an optional additional calculation to convert the conditional weighted delta C to unconditional weighted delta C values, but I decided to hold off on that for now.
+
+#Calculate estimated F14C values over time
+byyr_v2b[, `:=` (Fest_dC50_sack = (Cmix * Fmix + dC50_sack * F_fw) / (Cmix + dC50_sack),
+                 Fest_dC90_sack = (Cmix * Fmix + dC90_sack * F_fw) / (Cmix + dC90_sack),
+                 Fest_dC95_sack = (Cmix * Fmix + dC95_sack * F_fw) / (Cmix + dC95_sack),
+                 Fest_dC50_seed = (Cmix * Fmix + dC50_seed * F_fw) / (Cmix + dC50_seed),
+                 Fest_dC90_seed = (Cmix * Fmix + dC90_seed * F_fw) / (Cmix + dC90_seed),
+                 Fest_dC95_seed = (Cmix * Fmix + dC95_seed * F_fw) / (Cmix + dC95_seed),
+                 Fest_dC50_spat = (Cmix * Fmix + dC50_spat * F_fw) / (Cmix + dC50_spat),
+                 Fest_dC90_spat = (Cmix * Fmix + dC90_spat * F_fw) / (Cmix + dC90_spat),
+                 Fest_dC95_spat = (Cmix * Fmix + dC95_spat * F_fw) / (Cmix + dC95_spat))]
+
+#Calculate the corresponding delta R values
+byyr_v2b[, `:=` (dR_dC50_sack = -8033 * log(Fest_dC50_sack / F_sw),
+                 dR_dC90_sack = -8033 * log(Fest_dC90_sack / F_sw),
+                 dR_dC95_sack = -8033 * log(Fest_dC95_sack / F_sw),
+                 dR_dC50_seed = -8033 * log(Fest_dC50_seed / F_sw),
+                 dR_dC90_seed = -8033 * log(Fest_dC90_seed / F_sw),
+                 dR_dC95_seed = -8033 * log(Fest_dC95_seed / F_sw),
+                 dR_dC50_spat = -8033 * log(Fest_dC50_spat / F_sw),
+                 dR_dC90_spat = -8033 * log(Fest_dC90_spat / F_sw),
+                 dR_dC95_spat = -8033 * log(Fest_dC95_spat / F_sw))]
+
+
+```
+
+
+Ok, let's re-try the mixing surface with the estimated F14C values from the process worked out with ChatGPT 5.2.
+
+```{r}
+
+#Create a wide-format version for later plotting
+byyr_sack <- pivot_wider(byyr_v2b[!is.na(Fest_dC50_sack) & yr >= 1950, .(yr, sal, Fest_dC50_sack)], names_from = "yr", values_from = "Fest_dC50_sack")
+
+#Create a matrix from byyr_sack for plotting using plotly
+f14c_v2_sack <- as.matrix(byyr_sack[,-1, with = FALSE])
+row.names(f14c_v2_sack) <- byyr_sack[[1]]
+colnames(f14c_v2_sack) <- colnames(byyr_sack)[2:length(colnames(byyr_sack))]
+
+f14c_surf_v2_sack <- plot_ly(z = ~f14c_v2_sack) %>%
+  add_surface(alpha = 0.85) %>%
+  layout(scene = list(xaxis = list(title = "Year"),
+                                   # ticktext = c(as.character(seq(6, 32, by = 2))),
+                                   # ticktext = c(as.character(seq(32, 6, by = -2))),
+                                   # tickvals = which(colnames(env_d_r2) %in% c(as.character(seq(6, 32, by = 2))))),
+                                   # tickvals = which(colnames(env_d_r_gr) %in% c(as.character(seq(32, 6, by = -2))))),
+                      yaxis = list(title = "Salinity"),
+                                   # ticktext = c(as.character(seq(41, 3, by = -2))),
+                                   # tickvals = c(as.character(seq(41, 3, by = -2)))),
+                                   # ticktext = c(as.character(seq(3, 41, by = 2))),
+                                   # tickvals = c(as.character(seq(3, 41, by = 2)))),
+                      zaxis = list(title = "F14C")))
+f14c_surf_v2_sack
+```
+
+
+
+```{r}
+
+#Create a wide-format version for later plotting
+byyr_seed <- pivot_wider(byyr_v2b[!is.na(Fest_dC50_seed) & yr >= 1950, .(yr, sal, Fest_dC50_seed)], names_from = "yr", values_from = "Fest_dC50_seed")
+
+#Create a matrix from byyr_sack for plotting using plotly
+f14c_v2_seed <- as.matrix(byyr_seed[,-1, with = FALSE])
+row.names(f14c_v2_seed) <- byyr_seed[[1]]
+colnames(f14c_v2_seed) <- colnames(byyr_seed)[2:length(colnames(byyr_seed))]
+
+f14c_surf_v2_seed <- plot_ly(z = ~f14c_v2_seed) %>%
+  add_surface(alpha = 0.85) %>%
+  layout(scene = list(xaxis = list(title = "Year"),
+                                   # ticktext = c(as.character(seq(6, 32, by = 2))),
+                                   # ticktext = c(as.character(seq(32, 6, by = -2))),
+                                   # tickvals = which(colnames(env_d_r2) %in% c(as.character(seq(6, 32, by = 2))))),
+                                   # tickvals = which(colnames(env_d_r_gr) %in% c(as.character(seq(32, 6, by = -2))))),
+                      yaxis = list(title = "Salinity"),
+                                   # ticktext = c(as.character(seq(41, 3, by = -2))),
+                                   # tickvals = c(as.character(seq(41, 3, by = -2)))),
+                                   # ticktext = c(as.character(seq(3, 41, by = 2))),
+                                   # tickvals = c(as.character(seq(3, 41, by = 2)))),
+                      zaxis = list(title = "F14C")))
+f14c_surf_v2_seed
+```
+
+
+```{r}
+
+#Create a wide-format version for later plotting
+byyr_spat <- pivot_wider(byyr_v2b[!is.na(Fest_dC50_spat) & yr >= 1950, .(yr, sal, Fest_dC50_spat)], names_from = "yr", values_from = "Fest_dC50_spat")
+
+#Create a matrix from byyr_sack for plotting using plotly
+f14c_v2_spat <- as.matrix(byyr_spat[,-1, with = FALSE])
+row.names(f14c_v2_spat) <- byyr_spat[[1]]
+colnames(f14c_v2_spat) <- colnames(byyr_spat)[2:length(colnames(byyr_spat))]
+
+f14c_surf_v2_spat <- plot_ly(z = ~f14c_v2_spat) %>%
+  add_surface(alpha = 0.85) %>%
+  layout(scene = list(xaxis = list(title = "Year"),
+                                   # ticktext = c(as.character(seq(6, 32, by = 2))),
+                                   # ticktext = c(as.character(seq(32, 6, by = -2))),
+                                   # tickvals = which(colnames(env_d_r2) %in% c(as.character(seq(6, 32, by = 2))))),
+                                   # tickvals = which(colnames(env_d_r_gr) %in% c(as.character(seq(32, 6, by = -2))))),
+                      yaxis = list(title = "Salinity"),
+                                   # ticktext = c(as.character(seq(41, 3, by = -2))),
+                                   # tickvals = c(as.character(seq(41, 3, by = -2)))),
+                                   # ticktext = c(as.character(seq(3, 41, by = 2))),
+                                   # tickvals = c(as.character(seq(3, 41, by = 2)))),
+                      zaxis = list(title = "F14C")))
+f14c_surf_v2_spat
+```
+
+Given that the growth analyses suggested the median salinities with highest growth potentials for sack, seed, and spat oysters were 26, 21, and 24, respectively, let's pull those salinity curves:
+
+```{r}
+
+ggplot(byyr_v2b[sal == 26 & !is.na(Fest_dC50_sack) & yr >= 1950, ]) +
+  geom_point(aes(x = yr, y = Fest_dC50_sack, color = "dC50")) +
+  geom_line(aes(x = yr, y = Fest_dC50_sack, color = "dC50")) +
+  geom_point(aes(x = yr, y = Fest_dC90_sack, color = "dC90")) +
+  geom_line(aes(x = yr, y = Fest_dC90_sack, color = "dC90")) +
+  geom_point(aes(x = yr, y = Fest_dC95_sack, color = "dC95")) +
+  geom_line(aes(x = yr, y = Fest_dC95_sack, color = "dC95")) +
+  theme_bw() +
+  labs(x = "Year", y = "F14C_estimated (sal = 26)", color = "Est. cond.\nΔ DIC\n(quantile)", title = "Sack oysters")
+
+```
+
+```{r}
+
+ggplot(byyr_v2b[sal == 21 & !is.na(Fest_dC50_seed) & yr >= 1950, ]) +
+  geom_point(aes(x = yr, y = Fest_dC50_seed, color = "dC50")) +
+  geom_line(aes(x = yr, y = Fest_dC50_seed, color = "dC50")) +
+  geom_point(aes(x = yr, y = Fest_dC90_seed, color = "dC90")) +
+  geom_line(aes(x = yr, y = Fest_dC90_seed, color = "dC90")) +
+  geom_point(aes(x = yr, y = Fest_dC95_seed, color = "dC95")) +
+  geom_line(aes(x = yr, y = Fest_dC95_seed, color = "dC95")) +
+  theme_bw() +
+  labs(x = "Year", y = "F14C_estimated (sal = 21)", color = "Est. cond.\nΔ DIC\n(quantile)", title = "Seed oysters")
+
+```
+
+
+```{r}
+
+ggplot(byyr_v2b[sal == 24 & !is.na(Fest_dC50_spat) & yr >= 1950, ]) +
+  geom_point(aes(x = yr, y = Fest_dC50_spat, color = "dC50")) +
+  geom_line(aes(x = yr, y = Fest_dC50_spat, color = "dC50")) +
+  geom_point(aes(x = yr, y = Fest_dC90_spat, color = "dC90")) +
+  geom_line(aes(x = yr, y = Fest_dC90_spat, color = "dC90")) +
+  geom_point(aes(x = yr, y = Fest_dC95_spat, color = "dC95")) +
+  geom_line(aes(x = yr, y = Fest_dC95_spat, color = "dC95")) +
+  theme_bw() +
+  labs(x = "Year", y = "F14C_estimated (sal = 24)", color = "Est. cond.\nΔ DIC\n(quantile)", title = "Spat oysters")
+
+```
+
+Let's compare the three size classes for dC50 too.
+```{r}
+
+ggplot() +
+  geom_point(data = byyr_v2b[sal == 24 & !is.na(Fest_dC50_spat) & yr >= 1950, ], aes(x = yr, y = Fest_dC50_spat, color = "Spat (sal = 24)")) +
+  geom_line(data = byyr_v2b[sal == 24 & !is.na(Fest_dC50_spat) & yr >= 1950, ], aes(x = yr, y = Fest_dC50_spat, color = "Spat (sal = 24)")) +
+  geom_point(data = byyr_v2b[sal == 21 & !is.na(Fest_dC50_seed) & yr >= 1950, ], aes(x = yr, y = Fest_dC50_seed, color = "Seed (sal = 21)")) +
+  geom_line(data = byyr_v2b[sal == 21 & !is.na(Fest_dC50_seed) & yr >= 1950, ], aes(x = yr, y = Fest_dC50_seed, color = "Seed (sal = 21)")) +
+  geom_point(data = byyr_v2b[sal == 26 & !is.na(Fest_dC50_sack) & yr >= 1950, ], aes(x = yr, y = Fest_dC50_sack, color = "Sack (sal = 26)")) +
+  geom_line(data = byyr_v2b[sal == 26 & !is.na(Fest_dC50_sack) & yr >= 1950, ], aes(x = yr, y = Fest_dC50_sack, color = "Sack (sal = 26)")) +
+  theme_bw() +
+  labs(x = "Year", y = "F14C_estimated", color = "Size class", title = "dC50")
+
+#Export these curves for Jaleigh to test
+Fest_dC50_spat_sal24 <- byyr_v2b[sal == 24 & !is.na(Fest_dC50_spat), .(yr, Fest_dC50_spat_sal24 = Fest_dC50_spat)]
+Fest_dC50_seed_sal21 <- byyr_v2b[sal == 21 & !is.na(Fest_dC50_seed), .(yr, Fest_dC50_seed_sal21 = Fest_dC50_seed)]
+Fest_dC50_sack_sal26 <- byyr_v2b[sal == 26 & !is.na(Fest_dC50_sack), .(yr, Fest_dC50_sack_sal26 = Fest_dC50_sack)]
+
+CurvesForJaleigh <- merge(Fest_dC50_sack_sal26, Fest_dC50_seed_sal21, by = "yr")
+CurvesForJaleigh <- merge(CurvesForJaleigh, Fest_dC50_spat_sal24, by = "yr")
+
+fwrite(CurvesForJaleigh, here::here("NewCurves_forJaleigh_20260130.csv"))
+
+```
+
+
+#Modern Shells Discrepancy
+
+These curves are looking very promising, but six of Jaleigh's newest dates had F14C of live-caught oysters in 2022 and 2020 >1.02, which the mixing surface cannot explain. ChatGPT 5.2 suggested running a AMS time-averaging test to see how many years would need to be integrated by the growth to get a result >1.02.
+
+```{r}
+
+env_d_yr90[, `:=` (W_y_sack = mean(gr_sack_d2) * 365,
+                   W_y_seed = mean(gr_seed_d2) * 365,
+                   W_y_spat = mean(gr_spat_d2) * 365,
+                   n_days = uniqueN(day)), by = year] #W_y equals the mean annual growth potential
+w_y <- unique(env_d_yr90[, .(year, W_y_sack, W_y_seed, W_y_spat, n_days)])
+w_y[, `:=` (w_y_sack = W_y_sack / sum(W_y_sack),
+            w_y_seed = W_y_seed / sum(W_y_seed),
+            w_y_spat = W_y_spat / sum(W_y_spat))]
+
+#Check whether W_y is biased:
+ggplot(w_y) +
+  geom_point(aes(x = n_days, y = W_y_sack, color = "sack")) +
+  geom_point(aes(x = n_days, y = W_y_seed, color = "seed")) +
+  geom_point(aes(x = n_days, y = W_y_spat, color = "spat")) +
+  theme_bw()
+
+#Some correlation, so need to check for season imbalance
+env_d_yr90[, `:=` (W_ys_sack = mean(gr_sack_d2) * 365,
+                   W_ys_seed = mean(gr_seed_d2) * 365,
+                   W_ys_spat = mean(gr_spat_d2) * 365,
+                   ns_days = uniqueN(day)), by = list(year, season)]
+w_ys <- unique(env_d_yr90[, .(year, season, W_y_sack, W_y_seed, W_y_spat, W_ys_sack, W_ys_seed, W_ys_spat, n_days, ns_days)])
+w_ys[, f_ys := ns_days / n_days]
+
+#Check whether W_y is biased because of seasonal imbalances (there doesn't appear to be anything striking, so w_y kernel should be good.)
+ggplot(w_ys, aes(x = ns_days, y = n_days, color = season)) +
+  geom_point() +
+  theme_bw()
+sack <- ggplot(env_d_yr90[!is.na(W_ys_sack), ]) +
+  geom_bar(aes(x = year, fill = season)) +
+  theme_bw() +
+  labs(title = "Sack") +
+  theme(legend.position = "none")
+seed <- ggplot(env_d_yr90[!is.na(W_ys_seed), ]) +
+  geom_bar(aes(x = year, fill = season)) +
+  theme_bw() +
+  labs(title = "Seed") +
+  theme(legend.position = "none")
+spat <- ggplot(env_d_yr90[!is.na(W_ys_spat), ]) +
+  geom_bar(aes(x = year, fill = season)) +
+  theme_bw() +
+  labs(title = "Spat")
+
+sack + seed + spat
+
+#Calculate the time-averaged Fest (F_AMS) for a shell with growth year Y, plausible age A, and salinity S.
+yr_age <- paste0("Y2022_A", seq(3, 10)) #, rep(c("_sack", "_seed", "_spat"), each = 8)
+for(i in seq(1, length(yr_age))){
+  yr_age_i <- yr_age[i]
+  
+  for(s in c("sack", "seed", "spat")){
+    yr_age_is <- paste0(yr_age_i, "_", s)
+    
+    if(str_detect(yr_age_is, "sack")){
+      w_y[year <= 2022 & year >= 2022 - (i + 2), (yr_age_is) := W_y_sack / sum(W_y_sack)]
+      
+    } else if(str_detect(yr_age_is, "seed")){
+      w_y[year <= 2022 & year >= 2022 - (i + 2), (yr_age_is) := W_y_seed / sum(W_y_seed)]
+      
+    } else{
+      w_y[year <= 2022 & year >= 2022 - (i + 2), (yr_age_is) := W_y_spat / sum(W_y_spat)]
+      
+    }
+  }
+}
+
+
+F_AMS_2022 <- lapply(seq(3,10), function(A){
+  est_Size <- lapply(c("sack", "seed", "spat"), function(Size){
+    col_YA <- paste0("Y2022_A", A, "_", Size)
+    Fest_cols <- paste0(c("Fest_dC50_", "Fest_dC90_", "Fest_dC95_"), Size)
+    F_AMS_cols <- paste0(c("F_AMS_dC50_", "F_AMS_dC90_", "F_AMS_dC95_"), Size)
+    
+    est_A <- lapply(seq(15, 35), function(S){
+      
+      est_AS <- lapply(seq(2022 - A, 2022), function(Y){
+        
+        est_ASY <- data.table(A = A,
+                              S = S,
+                              Y = Y,
+                              w_y = w_y[year == Y, ..col_YA][[1]])
+        
+        for(Festcol in Fest_cols){
+          set(est_ASY,
+              j = Festcol,
+              value = byyr_v2b[sal == S & yr == Y, ..Festcol])
+          # est_ASY[, (Festcol) := byyr_v2b[sal == S & yr == Y, ..Festcol]],
+                               # byyr_v2b[sal == S & yr == Y, ..Fest_cols[2]][[1]],
+                               # byyr_v2b[sal == S & yr == Y, ..Fest_cols[3]][[1]])]
+        }
+        
+        return(est_ASY)
+      })
+    
+      est_AS2 <- rbindlist(est_AS, use.names = T, fill = T)
+      
+      # est_AS2[, (F_AMS_cols) := list(sum(w_y * ..Fest_cols[1]),
+      #                                sum(w_y * ..Fest_cols[2]),
+      #                                sum(w_y * ..Fest_cols[3]))]
+      for(F_AMS_col in F_AMS_cols){
+        Festcol <- Fest_cols[which(F_AMS_cols == F_AMS_col)]
+        
+        set(est_AS2,
+            j = F_AMS_col,
+            value = est_AS2[, sum(w_y * get(Festcol))])
+      }
+      
+      return(est_AS2)
+    })
+    
+    est_A2 <- rbindlist(est_A, use.names = T, fill = T)
+    
+  })
+  
+  est_Size2 <- rbindlist(est_Size, use.names = T, fill = T)
+  
+  return(est_Size2)
+})
+
+F_AMS_2022 <- rbindlist(F_AMS_2022, use.names = T, fill = T)
+F_AMS_2022b <- unique(F_AMS_2022[, .(A, S, 
+                                     F_AMS_dC50_sack, F_AMS_dC90_sack, F_AMS_dC95_sack, 
+                                     F_AMS_dC50_seed, F_AMS_dC90_seed, F_AMS_dC95_seed, 
+                                     F_AMS_dC50_spat, F_AMS_dC90_spat, F_AMS_dC95_spat)])
+
+
+taplot_sack <- ggplot() +
+  geom_point(data = byyr_v2b[yr == 2022 & sal >= 15 & sal <= 35, ], aes(x = sal, y = Fest_dC50_sack), color = "black") +
+  geom_point(data = F_AMS_2022b, aes(x = S, y = F_AMS_dC50_sack, color = as.factor(A))) +
+  theme_bw() +
+  labs(x = "Salinity", y = "Est. cond. Δ DIC (median)", color = "Age (time\naveraging)", title = "Sack") +
+  theme(legend.position = "none")
+
+taplot_seed <- ggplot() +
+  geom_point(data = byyr_v2b[yr == 2022 & sal >= 15 & sal <= 35, ], aes(x = sal, y = Fest_dC50_seed), color = "black") +
+  geom_point(data = F_AMS_2022b, aes(x = S, y = F_AMS_dC50_seed, color = as.factor(A))) +
+  theme_bw() +
+  labs(x = "Salinity", y = "Est. cond. Δ DIC (median)", color = "Age (time\naveraging)", title = "Seed") +
+  theme(legend.position = "none")
+
+taplot_spat <- ggplot() +
+  geom_point(data = byyr_v2b[yr == 2022 & sal >= 15 & sal <= 35, ], aes(x = sal, y = Fest_dC50_spat), color = "black") +
+  geom_point(data = F_AMS_2022b, aes(x = S, y = F_AMS_dC50_spat, color = as.factor(A))) +
+  theme_bw() +
+  labs(x = "Salinity", y = "Est. cond. Δ DIC (median)", color = "Age (time\naveraging)", title = "Spat")
+
+taplot_sack + taplot_seed + taplot_spat
+
+```
+
+This test suggests that time-averaging can't explain the entire difference between live-caught dates with F14C ~0.99 and those with F14C ~1.02, because even 10 years of growth averaged into an AMS sample would barely increase Fest by ~0.02.
+
+ChatGPT 5.2 suggested adding a second non-conservative term to the formula for Fest that could capture delayed releases of bomb carbon from marsh sediments (which I try next below), but I have also requested the size information for those 2020/2022 live-caught specimens from Jaleigh and I'm wondering if there are any sources of sample contamination that might help explain the difference as well.
+
+The specimens with high F14C are the three collected in 2020 and 2022, with the three collected in 2019(?) and 2025 having F14C ~0.99, which is close to the calibration curve values for post-2020. ChatGPT 5.2 suggested looking at the residuals time series to see if there were any excursions around that time.
+
+```{r}
+posresid_sumyr <- posresid[, .(med = median(value),
+                               q90 = quantile(value, 0.9),
+                               q95 = quantile(value, 0.95)), by = list(year, season)]
+
+ggplot(posresid_sumyr) + 
+  geom_point(aes(x = year, y = med, color = season), shape = 1) + 
+  geom_point(aes(x = year, y = q90, color = season), shape = 2) + 
+  geom_point(aes(x = year, y = q95, color = season), shape = 3) + 
+  theme_bw()
+
+```
+
+So, turns out that 2021 did have high positive residuals in Fall/Winter, with 2018 also having relatively high positive excursions in Summer (presumably might affect spat/seed sizes disproportionately based on growth analyses), but would require the specimens collected in 2022 to be four years old, which is getting up there.
+
+
+
+
+```{r}
+#Calculate a 40-year running average to produce the dC_bomb
+byyr_v2b[!is.na(F_fw), F_fw_40ya := frollmean(F_fw, n = 40, align = "right"), by = sal]
+
+#Try an exponential with mean age 20yr
+tau <- 20
+byyr_v2b[!is.na(F_fw), F_fw_exp20 := frollapply(F_fw, n = 40, align = "right", fill = NA_real_, 
+                                                FUN = function(x){
+                                                  age <- rev(seq_along(x) - 1L)
+                                                  w_raw <- exp(-age / tau)
+                                                  w <- w_raw/sum(w_raw)
+                                                  sum(w * x)
+                                                }), by = sal]
+
+#Try a lognormal with a peak at older ages
+mu <- log(40)
+sigma <- 0.6
+byyr_v2b[!is.na(F_fw), F_fw_lnorm40 := frollapply(F_fw, n = 80, align = "right", fill = NA_real_, 
+                                                  FUN = function(x){
+                                                    age <- rev(seq_along(x) - 1L)
+                                                    w_raw <- dlnorm(age + 1e-6, meanlog = mu, sdlog = sigma) 
+                                                    w <- w_raw/sum(w_raw)
+                                                    sum(w * x)
+                                                  }), by = sal]
+
+# mu <- log(55)
+# sigma <- 0.4
+# byyr_v2b[!is.na(F_fw), F_fw_lnorm55 := frollapply(F_fw, n = 80, align = "right", fill = NA_real_, 
+#                                                   FUN = function(x){
+#                                                     age <- rev(seq_along(x) - 1L)
+#                                                     w_raw <- dlnorm(age + 1e-6, meanlog = mu, sdlog = sigma) 
+#                                                     w <- w_raw/sum(w_raw)
+#                                                     sum(w * x)
+#                                                   }), by = sal]
+
+
+#Look at the kernel
+mu <- log(40)
+sigma <- 0.6
+age <- byyr_v2b[!is.na(F_fw) & sal == 24 & yr >= 1945, rev(seq_along(F_fw) - 1L)]
+w_raw <- dlnorm(age + 1e-6, meanlog = mu, sdlog = sigma) 
+w <- w_raw/sum(w_raw)
+F_fw_lnorm <- byyr_v2b[!is.na(F_fw) & sal == 24 & yr >= 1945, sum(w * F_fw)]
+
+plotdat <- data.table(age = age,
+                      w = w,
+                      F_fw_lnorm = F_fw_lnorm)
+
+ggplot(plotdat, aes(age, w)) +
+  geom_line() +
+  labs(
+    x = "Carbon age (years)",
+    y = "Kernel weight",
+    title = paste0("Lognormal marsh-memory kernel, mu = log(", exp(mu), "), sigma = ", sigma)
+  ) +
+  theme_minimal()
+
+```
+
+
+Sounds like a "marsh memory" event-driven enrichment of bomb-carbon is a technically possible explanation for discrepancy in 2020/2022 specimen F14C. Need to calculate "Fest_event" values with an additional enrichment term based on the highest expected (median) seasonal DIC residuals (i.e., ~0.0003).
+
+```{r}
+
+byyr_v2b[!is.na(F_fw), `:=` (Fest_event_dC50_sack = (Cmix * Fest_dC50_sack + dC))]
+
+#Calculate estimated F14C values over time
+byyr_v2b[, `:=` (Fest_dC50_sack = (Cmix * Fmix + dC50_sack * F_fw) / (Cmix + dC50_sack),
+                 Fest_dC90_sack = (Cmix * Fmix + dC90_sack * F_fw) / (Cmix + dC90_sack),
+                 Fest_dC95_sack = (Cmix * Fmix + dC95_sack * F_fw) / (Cmix + dC95_sack),
+                 Fest_dC50_seed = (Cmix * Fmix + dC50_seed * F_fw) / (Cmix + dC50_seed),
+                 Fest_dC90_seed = (Cmix * Fmix + dC90_seed * F_fw) / (Cmix + dC90_seed),
+                 Fest_dC95_seed = (Cmix * Fmix + dC95_seed * F_fw) / (Cmix + dC95_seed),
+                 Fest_dC50_spat = (Cmix * Fmix + dC50_spat * F_fw) / (Cmix + dC50_spat),
+                 Fest_dC90_spat = (Cmix * Fmix + dC90_spat * F_fw) / (Cmix + dC90_spat),
+                 Fest_dC95_spat = (Cmix * Fmix + dC95_spat * F_fw) / (Cmix + dC95_spat))]
+
+
+```
+
+
+#Probabilistic Surface Model
+
+Now, we need a probabilistic framework because using the curves for calibration requires estimates of uncertainty. I asked ChatGPT 5.2 to suggest a method for propagating error through to create a credible interval surface. Here are the steps:
+
+1) Start by creating the surface grid.
+
+```{r}
+#Create the grid
+sal_grid <- seq(0, 40, by = 1)
+yr_grid <- c(seq(-50, 1950, by = 10), seq(1951, 2025, by = 1))
+seasons <- c("Sp", "Su", "F", "W")
+grid <- CJ(sal = sal_grid, yr = yr_grid, season = seasons)
+
+#Format year and season as factors to match data from dic x sal model
+grid[, `:=` (year = factor(yr, levels = levels(dicsalmod_skew2$data$year)),
+             season2 = factor(season, levels = levels(dicsalmod_skew2$data$season)))]
+
+```
+
+
+2) DIC draws from the brms model; use both posterior_epred() and posterior_predict() to enable derivation of residual-style ΔC inside each draw
+
+```{r}
+N <- 1000  # number of draws
+
+# newdata_dic <- as.data.frame(grid)[, c("sal","season","year")]
+#Pull grid matrix for overlapping range of years in growth data and dic data (i.e., 2012 - 2024); these are the "donor years"
+newdata_dic <- grid[yr >= 2012 & yr <= 2024, .(sal, season = season2, year)]
+
+dic_mu <- posterior_epred(
+  dicsalmod_skew2, newdata = newdata_dic, ndraws = N,
+  allow_new_levels = TRUE,
+  sample_new_levels = "gaussian"  # reasonable for new year levels
+)  # N x nrow(grid)
+
+dic_y <- posterior_predict(
+  dicsalmod_skew2, newdata = newdata_dic, ndraws = N,
+  allow_new_levels = TRUE,
+  sample_new_levels = "gaussian"
+)  # N x nrow(grid)
+
+```
+
+
+3) Compute positive residual ΔC for each draw and collapse into a reference bank
+
+```{r}
+deltaC_pos <- pmax(dic_y - dic_mu, 0)   # N x n_donor_years
+
+
+
+```
+
+
+4) Build "draw generators" for each curve component (using models where available and means/sds when not).
+
+```{r}
+
+atm_draws <- function(yrs, cut_yr = 1999, N, fit_atm_spline, atm_table) {
+  # atm_table: data.table with columns yr, mu, sd for pre-2000 years (or whatever)
+  out <- matrix(NA_real_, nrow = N, ncol = length(yrs))
+  colnames(out) <- yrs
+  
+  yrs <- as.integer(yrs)
+  idx_spline <- which(yrs > cut_yr)  # adjust threshold to your model span
+  idx_tab    <- which(yrs <= cut_yr)
+  
+  if (length(idx_spline)) {
+    newdata <- data.frame(yr2 = yrs[idx_spline] - (cut_yr + 1))
+    ep <- posterior_epred(fit_atm_spline, newdata = newdata, ndraws = N)
+    # posterior_epred returns N x length(idx_spline)
+    out[, idx_spline] <- ep
+  }
+  
+  if (length(idx_tab)) {
+    tab <- atm_table[.(yrs[idx_tab]), on = "yr"]
+    # draw per-year
+    for (j in seq_along(idx_tab)) out[, idx_tab[j]] <- rnorm(N, tab$mu[j], tab$sd[j])
+  }
+  out
+}
+
+#Call the function
+F_fw_by_year <- atm_draws(yrs = unique(grid$yr), cut_yr = 1999, N = 1000, fit_atm_spline = atm_extend3, atm_table = atm_curve[yr >= -50, .(yr, mu = f14c, sd = f14c_sd)])
+
+```
+
+
+```{r}
+
+mar_draws <- function(yrs, cut_yr = 1950, N, fit_mar_model, mar_table) {
+  out <- matrix(NA_real_, nrow = N, ncol = length(yrs))
+  colnames(out) <- yrs
+  
+  yrs <- as.integer(yrs)
+  idx_model <- which(yrs > cut_yr)  # adjust threshold to your model span
+  idx_tab   <- which(yrs <= cut_yr)
+  
+  # If you have a model for some span, define idx_model accordingly
+  # Example:
+  # idx_model <- which(yrs >= 1950 & yrs <= 2025)
+  # idx_tab   <- setdiff(seq_along(yrs), idx_model)
+  
+  if (length(idx_model)) {
+    newdata <- data.frame(year = yrs[idx_model],
+                          current = 65,
+                          source = "shell")
+    ep <- posterior_epred(fit_mar_model, newdata = newdata, ndraws = N)
+    out[, idx_model] <- ep
+  }
+  
+  if (length(idx_tab)) {
+    tab <- mar_table[.(yrs[idx_tab]), on = "yr"]
+    for (j in seq_along(idx_tab)) out[, idx_tab[j]] <- rnorm(N, tab$mu[j], tab$sd[j])
+  }
+  out
+}
+
+#Call the function
+F_sw_by_year <- mar_draws(yrs = unique(grid$yr), cut_yr = 1950, N = 1000, fit_mar_model = gamtest7, mar_table = m20[year >= -50, .(yr = year, mu = f14c, sd = f14c_sd)])
+
+```
+
+
+5) Growth-weighted seasonal integration
+
+Need to generate weights across the whole grid. Start with 'observed' weights from the daily growth potential results.
+
+```{r}
+#Take a look at the year-to-year variability in daily growth potential profiles (just 2001 - 2010, to get an idea)
+ggplot(env_d_yr90[year %in% c(2001:2010), ]) +
+     geom_hline(yintercept = 0, color = "black", lwd = 0.5) +
+     geom_line(aes(x = day, y = gr_spat, color = "spat")) +
+     geom_point(aes(x = day, y = gr_spat, color = "spat", shape = season)) +
+     geom_line(aes(x = day, y = gr_seed, color = "seed")) +
+     geom_point(aes(x = day, y = gr_seed, color = "seed", shape = season)) +
+     geom_line(aes(x = day, y = gr_sack, color = "sack")) +
+     geom_point(aes(x = day, y = gr_sack, color = "sack", shape = season)) +
+     theme_bw() +
+     labs(y = "growth potential", color = "size class") +
+     facet_wrap(~year, ncol = 2)
+
+```
+
+There is a lot of inter-annual variability in the shapes of the daily growth potential profiles, so ChatGPT 5.2 recommended an approach where weights for each season and year are derived from the available data (i.e., 2001-2024), then previous years are populated by randomly choosing one of the available years as a "donor" year for weights. 
+
+```{r}
+#replace negative growth potential estimates with zeros
+env_d_yr90[, gr_spat2 := gr_spat][gr_spat < 0, gr_spat2 := 0]
+env_d_yr90[, gr_seed2 := gr_seed][gr_seed < 0, gr_seed2 := 0]
+env_d_yr90[, gr_sack2 := gr_sack][gr_sack < 0, gr_sack2 := 0]
+
+# dt_daily: columns date, yr, season, g  (g = daily growth potential)
+w_obs_spat <- env_d_yr90[!is.na(gr_spat2),
+  .(G = sum(gr_spat2, na.rm = TRUE), n_days = .N),
+  by = .(year, season)
+][
+  , G_year := sum(G), by = year
+][
+  , w := fifelse(G_year > 0, G / G_year, NA_real_)
+]
+
+w_obs_seed <- env_d_yr90[!is.na(gr_seed2),
+  .(G = sum(gr_seed2, na.rm = TRUE), n_days = .N),
+  by = .(year, season)
+][
+  , G_year := sum(G), by = year
+][
+  , w := fifelse(G_year > 0, G / G_year, NA_real_)
+]
+
+w_obs_sack <- env_d_yr90[!is.na(gr_sack2),
+  .(G = sum(gr_sack2, na.rm = TRUE), n_days = .N),
+  by = .(year, season)
+][
+  , G_year := sum(G), by = year
+][
+  , w := fifelse(G_year > 0, G / G_year, NA_real_)
+]
+
+# #Check normalizations
+# w_obs_spat[, sum(w), by = year]
+# w_obs_seed[, sum(w), by = year]
+# w_obs_sack[, sum(w), by = year]
+
+
+#Create a function to sample a set of weights for each year in the grid
+yrs_have <- sort(unique(w_obs_spat$yr))
+yrs_all  <- yr_grid  # your Fest grid years
+
+# functions to generate one realization of seasonal weights for each size class
+draw_w_years <- function() {
+  donor <- sample(yrs_have, length(yrs_all), replace = TRUE)
+  
+  spat_w <- data.table(yr = yrs_all, donor = donor)[
+    w_obs_spat, on = .(donor = year), nomatch = 0
+  ][
+    , .(year, season, w_spat)
+  ]
+  
+  seed_w <- data.table(yr = yrs_all, donor = donor)[
+    w_obs_seed, on = .(donor = year), nomatch = 0
+  ][
+    , .(year, season, w_seed)
+  ]
+  
+  sack_w <- data.table(yr = yrs_all, donor = donor)[
+    w_obs_sack, on = .(donor = year), nomatch = 0
+  ][
+    , .(year, season, w_sack)
+  ]
+  
+  all_w <- merge(spat_w, seed_w, by = c("year", "season"), all = T)
+  all_w <- merge(all_w, sack_w, by = c("year", "season"), all = T)
+  return(all_w)
+}
+
+```
+
+
+Need a separate approach for sampling delta C because the original data are sparse, with some years and season x year combinations lacking observations. ChatGTP 5.2 recommended creating a season-only deltaC bank based on realistic salinities drawn from the 2012-2024 data.
+
+```{r}
+# Inputs you must have:
+# - fit_dic: your skew_normal brms fit for dic
+# - dic_obs: the observed dataset used for the DIC model (or equivalent)
+#            must include: sal, season, year (factor), dic (optional)
+# - season levels must match fit_dic$data$season
+
+N_draws <- 1000          # posterior draws to use (match your existing)
+M_per_season <- 3000     # pseudo rows per season (increase if you want smoother)
+
+donor_years <- 2012:2024
+
+# Restrict to the "regime" period (overlap) to get realistic salinity distribution
+salsea <- rbindlist(list(unique(env_d_yr90[year %in% donor_years, .(year = factor(year, levels = as.character(donor_years)), season, sal = sal_med)]),
+                unique(gr_win_as3[!is.na(sal) & !is.na(dic), .(year, season, sal)])), 
+                use.names = T,
+                fill = T)
+salsea[, year_int := as.integer(as.character(year))]
+
+# # Seasons
+# season_levels <- levels(dicsalmod_skew2$data$season)
+# stopifnot(all(season_levels %in% unique(as.character(salsea$season))))
+# 
+# # Build pseudo dataset: M rows per season, sal drawn from observed pool
+# pseudo <- rbindlist(lapply(season_levels, function(ss) {
+#   data.table(
+#     sal = sample(salsea[season == ss, sal], M_per_season, replace = TRUE),
+#     season = factor(ss, levels = season_levels),
+#     # year is needed by your model; set to an arbitrary "typical" year level.
+#     # We'll allow new levels anyway, but easiest is to use an existing level.
+#     year = factor(as.character(donor_years[1]))  # e.g., "2012"
+#   )
+# }))
+# 
+# newdata_pseudo <- as.data.frame(pseudo)
+
+# Posterior draws of mean and replicated DIC on the pseudo dataset
+dic_mu <- posterior_epred(
+  dicsalmod_skew2, newdata = salsea, ndraws = N_draws,
+  allow_new_levels = TRUE, sample_new_levels = "gaussian"
+)
+
+dic_y <- posterior_predict(
+  dicsalmod_skew2, newdata = salsea, ndraws = N_draws,
+  allow_new_levels = TRUE, sample_new_levels = "gaussian"
+)
+
+deltaC_pos <- pmax(dic_y - dic_mu, 0)  # N_draws x nrow(sal_dt)
+
+#Collapse to a delta C bank by year x season. Pick a summary. I’d use median (stable) and optionally also keep a “tail” summary for later event logic.
+
+key <- paste(salsea$year, salsea$season, sep = "_")
+keys <- unique(key)
+idx_list <- split(seq_along(key), key)
+
+deltaC_bank_med <- matrix(NA_real_, nrow = N_draws, ncol = length(keys),
+                          dimnames = list(NULL, keys))
+deltaC_bank_p95 <- matrix(NA_real_, nrow = N_draws, ncol = length(keys),
+                          dimnames = list(NULL, keys))
+
+for (k in seq_along(keys)) {
+  idx <- idx_list[[keys[k]]]
+  # per draw summaries within this year-season bin
+  deltaC_bank_med[, k] <- apply(deltaC_pos[, idx, drop = FALSE], 1, median)
+  deltaC_bank_p95[, k] <- apply(deltaC_pos[, idx, drop = FALSE], 1, quantile, probs = 0.95)
+}
+
+```
+
+
+
+6) Fest posterior simulation
+<!-- Create Fest components based on earlier deterministic model -->
+
+<!-- ```{r} -->
+<!-- Fest_season_draw[i, ] <- Fest_formula( -->
+<!--   sal = grid$sal, -->
+<!--   yr  = grid$yr, -->
+<!--   season = grid$season, -->
+<!--   F_sw = F_sw_by_year[i, yr_col], -->
+<!--   F_fw = F_fw_by_year[i, yr_col], -->
+<!--   C_base = dic_mu[i, ], -->
+<!--   deltaC = deltaC_pos[i, ]   # or whatever your deterministic used -->
+<!-- ) -->
+
+<!-- ``` -->
+
+
+```{r}
+# grid: contains sal, yr, season
+grid[, cell := .GRP, by = .(sal, yr)]
+
+#Compute salinity fractions used in Fmix
+Ssw <- 35
+grid[, f_fw := pmin(pmax(1 - sal/Ssw, 0), 1)]
+grid[, f_sw := 1 - f_fw]
+
+#Map years to columns for curve draw matrices
+grid[, yr_col := match(yr, yr_grid)]
+
+#Generate posterior draws for Cmix on the grid (once)
+N <- nrow(deltaC_bank_med)  # match your bank draw count
+
+newdata_dic <- data.frame(
+  sal = grid$sal,
+  season = factor(grid$season, levels = levels(dicsalmod_skew2$data$season)),
+  year = factor(as.character(grid$yr))
+)
+
+Cmix_draw <- posterior_epred(
+  dicsalmod_skew2, newdata = newdata_dic, ndraws = N,
+  allow_new_levels = TRUE, sample_new_levels = "gaussian"
+)  # N x nrow(grid)
+
+
+#Create a donor-year mapping per draw
+draw_donor_map <- function() {
+  data.table(
+    yr = yr_grid,
+    donor = sample(donor_years, length(yr_grid), replace = TRUE)
+  )
+}
+
+
+#Make donor year keys for each size class
+w_obs_spat_k <- w_obs_spat[year %in% donor_years]
+w_obs_spat_k[, key := paste(year, season, sep = "_")]
+setkey(w_obs_spat_k, key)
+
+w_obs_seed_k <- w_obs_seed[year %in% donor_years]
+w_obs_seed_k[, key := paste(year, season, sep = "_")]
+setkey(w_obs_seed_k, key)
+
+w_obs_sack_k <- w_obs_sack[year %in% donor_years]
+w_obs_sack_k[, key := paste(year, season, sep = "_")]
+setkey(w_obs_sack_k, key)
+
+
+#Main loop
+ncell <- max(grid$cell)
+Fest_cell_draw_spat <- matrix(NA_real_, nrow = N, ncol = ncell)
+Fest_cell_draw_seed <- matrix(NA_real_, nrow = N, ncol = ncell)
+Fest_cell_draw_sack <- matrix(NA_real_, nrow = N, ncol = ncell)
+
+for (i in 1:N) {
+  
+  cat("\r", i, "/", N) #, "\n"
+
+  # 1) donor mapping for target years
+  map_i <- draw_donor_map()  # yr -> donor
+  setkey(map_i, yr)
+
+  # 2) attach donor year to each grid row
+  grid_spat_i <- copy(grid)
+  grid_seed_i <- copy(grid)
+  grid_sack_i <- copy(grid)
+  grid_spat_i[map_i, donor := i.donor, on = "yr"]
+  grid_seed_i[map_i, donor := i.donor, on = "yr"]
+  grid_sack_i[map_i, donor := i.donor, on = "yr"]
+
+  # 3) weights: join donor-year weights onto each grid row
+  grid_spat_i[, w_key := paste(donor, season, sep = "_")]
+  grid_seed_i[, w_key := paste(donor, season, sep = "_")]
+  grid_sack_i[, w_key := paste(donor, season, sep = "_")]
+  grid_spat_i[w_obs_spat_k, w := i.w, on = .(w_key = key)]
+  grid_seed_i[w_obs_seed_k, w := i.w, on = .(w_key = key)]
+  grid_sack_i[w_obs_sack_k, w := i.w, on = .(w_key = key)]
+  
+  # cat("w NA:", sum(is.na(grid_spat_i$w)), "of", nrow(grid_spat_i), "\n")
+  # sanity
+  # stopifnot(!any(is.na(grid_i$w)))
+
+  # 4) ΔC: lookup from matrix for this draw
+  # (returns a vector length nrow(grid))
+  deltaC_vec_spat <- deltaC_bank_med[i, grid_spat_i$w_key]
+  deltaC_vec_seed <- deltaC_bank_med[i, grid_seed_i$w_key]
+  deltaC_vec_sack <- deltaC_bank_med[i, grid_sack_i$w_key]
+  
+  # cat("deltaC NA:", sum(is.na(deltaC_vec_spat)), "of", length(deltaC_vec_spat), "\n")
+
+  # 5) Curve terms for this draw and grid rows
+  yr_col_spat <- grid_spat_i$yr_col
+  yr_col_seed <- grid_seed_i$yr_col
+  yr_col_sack <- grid_sack_i$yr_col
+  
+  # cat("yr_col NA:", sum(is.na(grid_spat_i$yr)), "of", nrow(grid_spat_i), "\n")
+
+  Ffw_vec_spat <- F_fw_by_year[i, yr_col_spat]
+  Fsw_vec_spat <- F_sw_by_year[i, yr_col_spat]
+  Ffw_vec_seed <- F_fw_by_year[i, yr_col_seed]
+  Fsw_vec_seed <- F_sw_by_year[i, yr_col_seed]
+  Ffw_vec_sack <- F_fw_by_year[i, yr_col_sack]
+  Fsw_vec_sack <- F_sw_by_year[i, yr_col_sack]
+  
+  # cat("Ffw NA:", sum(is.na(Ffw_vec_spat)), "Fsw NA:", sum(is.na(Fsw_vec_spat)), "\n")
+
+  Fmix_vec_spat <- grid_spat_i$f_sw * Fsw_vec_spat + grid_spat_i$f_fw * Ffw_vec_spat
+  Fmix_vec_seed <- grid_seed_i$f_sw * Fsw_vec_seed + grid_seed_i$f_fw * Ffw_vec_seed
+  Fmix_vec_sack <- grid_sack_i$f_sw * Fsw_vec_sack + grid_sack_i$f_fw * Ffw_vec_sack
+
+  # 6) Cmix for this draw and grid rows
+  Cmix_vec <- Cmix_draw[i, ]
+  
+  # cat("Cmix NA:", sum(is.na(Cmix_vec)), "of", length(Cmix_vec), "\n")
+
+  # 7) Seasonal Fest for this draw
+  Fest_season_vec_spat <- (Cmix_vec * Fmix_vec_spat + deltaC_vec_spat * Ffw_vec_spat) / (Cmix_vec + deltaC_vec_spat)
+  Fest_season_vec_seed <- (Cmix_vec * Fmix_vec_seed + deltaC_vec_seed * Ffw_vec_seed) / (Cmix_vec + deltaC_vec_seed)
+  Fest_season_vec_sack <- (Cmix_vec * Fmix_vec_sack + deltaC_vec_sack * Ffw_vec_sack) / (Cmix_vec + deltaC_vec_sack)
+
+  # 8) Growth-weight integrate across seasons to (sal, yr)
+  tmp_spat <- data.table(cell = grid_spat_i$cell, w = grid_spat_i$w, Fest = Fest_season_vec_spat)
+  Fest_cell_draw_spat[i, ] <- tmp_spat[, sum(w * Fest) / sum(w), by = cell][order(cell), V1]
+  tmp_seed <- data.table(cell = grid_seed_i$cell, w = grid_seed_i$w, Fest = Fest_season_vec_seed)
+  Fest_cell_draw_seed[i, ] <- tmp_seed[, sum(w * Fest) / sum(w), by = cell][order(cell), V1]
+  tmp_sack <- data.table(cell = grid_sack_i$cell, w = grid_sack_i$w, Fest = Fest_season_vec_sack)
+  Fest_cell_draw_sack[i, ] <- tmp_sack[, sum(w * Fest) / sum(w), by = cell][order(cell), V1]
+}
+
+#Create delta14C versions
+d14Cest_cell_draw_spat <- rice::F14CtoDelta14C(Fest_cell_draw_spat)
+
+
+#Summarize
+cell_dt_spat <- unique(grid[, .(cell, sal, yr)])
+setorder(cell_dt_spat, cell)
+
+t_vec <- 1950 - cell_dt_spat$yr   # length = ncol(Fest_cell_draw_spat)
+stopifnot(length(t_vec) == ncol(Fest_cell_draw_spat))
+
+Fest_mat_spat <- as.matrix(Fest_cell_draw_spat)  # same dims
+storage.mode(Fest_mat_spat) <- "double"
+d14c_draw_spat <- matrix(NA_real_, nrow = nrow(Fest_mat_spat), ncol = ncol(Fest_mat_spat))
+
+Fest_mat_seed <- as.matrix(Fest_cell_draw_seed)  # same dims
+storage.mode(Fest_mat_seed) <- "double"
+d14c_draw_seed <- matrix(NA_real_, nrow = nrow(Fest_mat_seed), ncol = ncol(Fest_mat_seed))
+
+Fest_mat_sack <- as.matrix(Fest_cell_draw_sack)  # same dims
+storage.mode(Fest_mat_sack) <- "double"
+d14c_draw_sack <- matrix(NA_real_, nrow = nrow(Fest_mat_sack), ncol = ncol(Fest_mat_sack))
+
+for (j in seq_len(ncol(Fest_mat_spat))) {
+  d14c_draw_spat[, j] <- rice::F14CtoDelta14C(Fest_mat_spat[, j, drop = T], t = t_vec[j])$Delta14C
+  d14c_draw_seed[, j] <- rice::F14CtoDelta14C(Fest_mat_seed[, j, drop = T], t = t_vec[j])$Delta14C
+  d14c_draw_sack[, j] <- rice::F14CtoDelta14C(Fest_mat_sack[, j, drop = T], t = t_vec[j])$Delta14C
+}
+
+cell_dt_spat[, Fest_med := apply(Fest_cell_draw_spat, 2, median)]
+cell_dt_spat[, Fest_lo  := apply(Fest_cell_draw_spat, 2, quantile, probs = 0.05)]
+cell_dt_spat[, Fest_hi  := apply(Fest_cell_draw_spat, 2, quantile, probs = 0.95)]
+cell_dt_spat[, Fest_mn := apply(Fest_cell_draw_spat, 2, mean)]
+cell_dt_spat[, Fest_sd := apply(Fest_cell_draw_spat, 2, sd)]
+cell_dt_spat[, d14c_med := apply(d14c_draw_spat, 2, median)]
+cell_dt_spat[, d14c_lo  := apply(d14c_draw_spat, 2, quantile, probs = 0.05)]
+cell_dt_spat[, d14c_hi  := apply(d14c_draw_spat, 2, quantile, probs = 0.95)]
+cell_dt_spat[, d14c_mn := apply(d14c_draw_spat, 2, mean)]
+cell_dt_spat[, d14c_sd := apply(d14c_draw_spat, 2, sd)]
+
+cell_dt_seed <- unique(grid[, .(cell, sal, yr)])
+cell_dt_seed[, Fest_med := apply(Fest_cell_draw_seed, 2, median)]
+cell_dt_seed[, Fest_lo  := apply(Fest_cell_draw_seed, 2, quantile, probs = 0.05)]
+cell_dt_seed[, Fest_hi  := apply(Fest_cell_draw_seed, 2, quantile, probs = 0.95)]
+cell_dt_seed[, Fest_mn := apply(Fest_cell_draw_seed, 2, mean)]
+cell_dt_seed[, Fest_sd := apply(Fest_cell_draw_seed, 2, sd)]
+cell_dt_seed[, d14c_med := apply(d14c_draw_seed, 2, median)]
+cell_dt_seed[, d14c_lo  := apply(d14c_draw_seed, 2, quantile, probs = 0.05)]
+cell_dt_seed[, d14c_hi  := apply(d14c_draw_seed, 2, quantile, probs = 0.95)]
+cell_dt_seed[, d14c_mn := apply(d14c_draw_seed, 2, mean)]
+cell_dt_seed[, d14c_sd := apply(d14c_draw_seed, 2, sd)]
+
+cell_dt_sack <- unique(grid[, .(cell, sal, yr)])
+cell_dt_sack[, Fest_med := apply(Fest_cell_draw_sack, 2, median)]
+cell_dt_sack[, Fest_lo  := apply(Fest_cell_draw_sack, 2, quantile, probs = 0.05)]
+cell_dt_sack[, Fest_hi  := apply(Fest_cell_draw_sack, 2, quantile, probs = 0.95)]
+cell_dt_sack[, Fest_mn := apply(Fest_cell_draw_sack, 2, mean)]
+cell_dt_sack[, Fest_sd := apply(Fest_cell_draw_sack, 2, sd)]
+cell_dt_sack[, d14c_med := apply(d14c_draw_sack, 2, median)]
+cell_dt_sack[, d14c_lo  := apply(d14c_draw_sack, 2, quantile, probs = 0.05)]
+cell_dt_sack[, d14c_hi  := apply(d14c_draw_sack, 2, quantile, probs = 0.95)]
+cell_dt_sack[, d14c_mn := apply(d14c_draw_sack, 2, mean)]
+cell_dt_sack[, d14c_sd := apply(d14c_draw_sack, 2, sd)]
+
+
+```
+
+
+```{r}
+ggplot() +
+  geom_ribbon(data = cell_dt_spat[sal == 31 & yr >= 1950, ], aes(x = yr, ymin = Fest_mn - Fest_sd, ymax = Fest_mn + Fest_sd, color = "Spat (sal = 31)"), alpha = 0.1) +
+  geom_point(data = cell_dt_spat[sal == 31 & yr >= 1950, ], aes(x = yr, y = Fest_mn, color = "Spat (sal = 31)")) +
+  geom_line(data = cell_dt_spat[sal == 31 & yr >= 1950, ], aes(x = yr, y = Fest_mn, color = "Spat (sal = 31)")) +
+  geom_ribbon(data = cell_dt_seed[sal == 31 & yr >= 1950, ], aes(x = yr, ymin = Fest_mn - Fest_sd, ymax = Fest_mn + Fest_sd, color = "Seed (sal = 31)"), alpha = 0.1) +
+  geom_point(data = cell_dt_seed[sal == 31 & yr >= 1950, ], aes(x = yr, y = Fest_mn, color = "Seed (sal = 31)")) +
+  geom_line(data = cell_dt_seed[sal == 31 & yr >= 1950, ], aes(x = yr, y = Fest_mn, color = "Seed (sal = 31)")) +
+  geom_ribbon(data = cell_dt_sack[sal == 26 & yr >= 1950, ], aes(x = yr, ymin = Fest_mn - Fest_sd, ymax = Fest_mn + Fest_sd, color = "Sack (sal = 26)"), alpha = 0.1) +
+  geom_point(data = cell_dt_sack[sal == 26 & yr >= 1950, ], aes(x = yr, y = Fest_mn, color = "Sack (sal = 26)")) +
+  geom_line(data = cell_dt_sack[sal == 26 & yr >= 1950, ], aes(x = yr, y = Fest_mn, color = "Sack (sal = 26)")) +
+  theme_bw() +
+  labs(x = "Year", y = "Mean est. F14C", color = "Size class")
+
+```
+
+
+Export standard, non-event curves for Jaleigh
+```{r}
+
+CurvesForJaleigh <- merge(cell_dt_spat[sal == 31, .(yr, f14c_spat = Fest_mn, f14c_spat_sd = Fest_sd, d14c_spat = d14c_mn, d14c_spat_sd = d14c_sd)],
+                          cell_dt_seed[sal == 31, .(yr, f14c_seed = Fest_mn, f14c_seed_sd = Fest_sd, d14c_seed = d14c_mn, d14c_seed_sd = d14c_sd)], by = "yr", all = T)
+
+CurvesForJaleigh <- merge(CurvesForJaleigh,
+                          cell_dt_sack[sal == 26, .(yr, f14c_sack = Fest_mn, f14c_sack_sd = Fest_sd, d14c_sack = d14c_mn, d14c_sack_sd = d14c_sd)], by = "yr", all = T)
+
+setnames(CurvesForJaleigh, 
+         tail(colnames(CurvesForJaleigh), 12), 
+         c(paste0(tail(colnames(CurvesForJaleigh), 12), c(rep("_sal31", 8), rep("_sal26", 4)))))
+
+fwrite(CurvesForJaleigh, here::here(paste0("NewCurves_forJaleigh_", Sys.Date(), ".csv")))
+
+```
+
+
+
