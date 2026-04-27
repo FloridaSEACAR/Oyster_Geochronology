@@ -28,21 +28,45 @@ suppressPackageStartupMessages(library(magrittr))
 suppressPackageStartupMessages(library(lme4))
 suppressPackageStartupMessages(library(cmdstanr))
 suppressPackageStartupMessages(library(bayesplot))
+suppressPackageStartupMessages(library(data.table))
 ```
  
 Create data list from Geochronology "sampsum" data table created from "HOBS-geochronology-ms2.rmd". For a simulation illustrating how this model works, see "GeoChron_sim.Rmd."
 
 ```{r}
+sampsum  <- fread(here::here('sampleSummary_2022-08-08.csv'))
+sampsum[ , locality := str_replace(sample, "_R.H.S.", "")]
+sampsum[ , locality := str_replace(locality, "JI-WC", "JI")]
+sampsum[, locality := fcase(locality %in% setdiff(unique(sampsum$locality), c("GI", "HC", "LS")), locality,
+                            locality == "GI", "GI-EC",
+                            locality == "HC", "HC-MC",
+                            locality == "LS", "LSG")]
+sampsum[, locality := factor(locality, levels = c("LSG", "GI-EC", "LC", "LB", "HC-MC", "NP", "BH", "JI", "PC", "MR", "GR"))]
+sampsum$reefID <- paste0(sampsum$locality, " R", sampsum$reef)
+sampsum$holeID <- stringr::str_extract(sampsum$sample, ".._R.H.")
+sampsum$holeN <- stringr::str_extract(sampsum$holeID, "R.H.")
+sampsum$holeN <- stringr::str_extract(sampsum$holeN, "H.")
+sampsum$holeN2 <- str_replace(sampsum$holeN, "H", "Sample hole ")
+sampsum$holeN3 <- str_replace(sampsum$holeN, "H", "Hole ")
+sampsum$median_age_bp <- abs(sampsum$Sample_median_age - 2019)
+sampsum[, reef2 := paste0("Reef ", reef)]
+sampsum[, Sample_n := factor(Sample_n, levels = c(2, 3, 4, 5, 6, 7))]
+sampsum[, reef_lab := fcase(locality == "GI-EC" & reef == 4, 3L,
+                            locality == "LC" & reef == 5, 4L,
+                            locality == "MR" & reef == 2, 1L,
+                            locality == "MR" & reef == 3, 2L)][is.na(reef_lab), reef_lab := reef]
+
+sampsum[, depth := str_extract(depth, "..-..")]
+setorder(sampsum, "locality", "reef", "holeN", "depth")
+
 sampsum[, Loc := str_sub(sample, 1, 2), by = sample]
 sampsum[, Locality := as.integer(factor(Loc, levels = unique(sampsum$Loc)))]
-# sampsum[, reef2 := fcase(Locality %in% c(1, 2, 5:7, 9:11), reef,
-#                          Locality == 3, ifelse(reef == 5, 4L, reef),
-#                          Locality == 4, ifelse(reef == 4, 3L, reef),
-#                          Locality == 8, as.integer(reef - 1)), by = c("Locality", "reef")]
 sampsum[, reef3 := as.integer(factor(reefID, levels = unique(sampsum$reefID)))]
 sampsum[, reef2Locality := Locality, by = c("Locality", "reef")]
 sampsum[, holeID2 := holeID]
 sampsum[, sampsperhole := length(holeID), by = holeID2]
+
+
 sampsum_r2l <- distinct(sampsum[, .(reef, 
                                     locality, 
                                     reefID,
@@ -55,6 +79,7 @@ sampsum_15to25cm <- distinct(sampsum[depth == "15-25", .(sample,
                                                          median_age_bp,
                                                          Sample_corrected_posterior_age_estimate,
                                                          reef,
+                                                         reef_lab,
                                                          locality,
                                                          reefID,
                                                          holeID,
@@ -68,6 +93,7 @@ sampsum_25to35cm <- distinct(sampsum[depth == "25-35", .(sample,
                                                          median_age_bp,
                                                          Sample_corrected_posterior_age_estimate,
                                                          reef,
+                                                         reef_lab,
                                                          locality,
                                                          reefID,
                                                          holeID,
@@ -81,7 +107,8 @@ depthdiffs <- sampsum[sampsperhole == 2, .(sample,
                                            median_age_bp,
                                            Sample_corrected_posterior_age_estimate, 
                                            depth, 
-                                           reef, 
+                                           reef,
+                                           reef_lab,
                                            locality, 
                                            reefID, 
                                            holeID,
@@ -96,12 +123,10 @@ depthdiffs[, `:=` (depthdiff_mabp = median_age_bp[depth == "25-35"] -  median_ag
 depthdiffs2 <- distinct(depthdiffs[, .(reef, locality, reefID, holeID, Locality, reef3, reef2Locality, depthdiff_mabp, depthdiff_cpe)])
 
 locs <- distinct(sampsum_15to25cm[, .(locality, Locality)])
-locs[, loclab := 12 - Locality]
-setorder(locs, "Locality")
+locs[, loclab := 11 - Locality] #Changed from 12 to 11 because LB is temporarily removed due to dead shells being used in the Dead C calculation.
 
-reefs <- distinct(sampsum_15to25cm[, .(reefID, reef3)])
-reefs[, reeflab := 32 - reef3]
-setorder(reefs, "reef3")
+reefs <- distinct(sampsum_15to25cm[, .(locality, reefID, reef, reef_lab, reef3)])
+#reefs[, `:=` (locality = factor(locality, levels = c("LSG", "GI-EC", "LC", "LB", "HC-MC", "NP", "BH", "JI", "PC", "MR", "GR")), reeflab = 32 - reef3)]
 
 #median estimated sample ages and corresponding time-averaging estimates from Dominguez et al. (2016)
 Detal <- data.table(median_age_bp = c(123, 283, 146, 148, 160, 2043), 
@@ -112,7 +137,7 @@ Detal <- data.table(median_age_bp = c(123, 283, 146, 148, 160, 2043),
                     nL = 1,
                     nR = 6)
 
-#for median age over space (15-25cm burial depth)
+#for median age over space (15-25cm burial depth); scaled version produces cleaner MCMC diagnostics, but is difficult to compare with Dominguez et al. (2016) results
 HOBS_medagexspace_15to25cm <- list(N = nrow(sampsum_15to25cm),
                                    Locality = sampsum_15to25cm$Locality,
                                    Reef = sampsum_15to25cm$reef3,
@@ -121,7 +146,15 @@ HOBS_medagexspace_15to25cm <- list(N = nrow(sampsum_15to25cm),
                                    nL = length(unique(sampsum_15to25cm$Locality)),
                                    nR = length(unique(sampsum_15to25cm$reef3)))
 
-#for CPE over space (15-25cm burial depth)
+HOBS_medagexspace_15to25cm_scaled <- list(N = nrow(sampsum_15to25cm),
+                                          Locality = sampsum_15to25cm$Locality,
+                                          Reef = sampsum_15to25cm$reef3,
+                                          Reef2Locality = sampsum_r2l$reef2Locality,
+                                          x = as.numeric(scale(sampsum_15to25cm$median_age_bp)),
+                                          nL = length(unique(sampsum_15to25cm$Locality)),
+                                          nR = length(unique(sampsum_15to25cm$reef3)))
+
+#for CPE over space (15-25cm burial depth); scaled version produces cleaner MCMC diagnostics, but is difficult to compare with Dominguez et al. (2016) results
 HOBS_cpexspace_15to25cm <- list(N = nrow(sampsum_15to25cm),
                                 Locality = sampsum_15to25cm$Locality,
                                 Reef = sampsum_15to25cm$reef3,
@@ -130,7 +163,15 @@ HOBS_cpexspace_15to25cm <- list(N = nrow(sampsum_15to25cm),
                                 nL = length(unique(sampsum_15to25cm$Locality)),
                                 nR = length(unique(sampsum_15to25cm$reef3)))
 
-#for median age over space (25-35cm burial depth)
+HOBS_cpexspace_15to25cm_scaled <- list(N = nrow(sampsum_15to25cm),
+                                       Locality = sampsum_15to25cm$Locality,
+                                       Reef = sampsum_15to25cm$reef3,
+                                       Reef2Locality = sampsum_r2l$reef2Locality,
+                                       x = as.numeric(scale(sampsum_15to25cm$Sample_corrected_posterior_age_estimate)),
+                                       nL = length(unique(sampsum_15to25cm$Locality)),
+                                       nR = length(unique(sampsum_15to25cm$reef3)))
+
+#for median age over space (25-35cm burial depth); scaled version produces cleaner MCMC diagnostics, but is difficult to compare with Dominguez et al. (2016) results
 HOBS_medagexspace_25to35cm <- list(N = nrow(sampsum_25to35cm),
                                    Locality = sampsum_25to35cm$Locality,
                                    Reef = sampsum_25to35cm$reef3,
@@ -138,6 +179,14 @@ HOBS_medagexspace_25to35cm <- list(N = nrow(sampsum_25to35cm),
                                    x = sampsum_25to35cm$median_age_bp,
                                    nL = length(unique(sampsum_25to35cm$Locality)),
                                    nR = length(unique(sampsum_25to35cm$reef3)))
+
+HOBS_medagexspace_25to35cm_scaled <- list(N = nrow(sampsum_25to35cm),
+                                          Locality = sampsum_25to35cm$Locality,
+                                          Reef = sampsum_25to35cm$reef3,
+                                          Reef2Locality = sampsum_r2l$reef2Locality,
+                                          x = as.numeric(scale(sampsum_25to35cm$median_age_bp)),
+                                          nL = length(unique(sampsum_25to35cm$Locality)),
+                                          nR = length(unique(sampsum_25to35cm$reef3)))
 
 #for CPE over space (25-35cm burial depth)
 HOBS_cpexspace_25to35cm <- list(N = nrow(sampsum_25to35cm),
@@ -166,23 +215,6 @@ HOBS_cpeddxspace <- list(N = nrow(depthdiffs2),
                          nL = length(unique(depthdiffs2$Locality)),
                          nR = length(unique(depthdiffs2$reef3)))
 
-#for median age depth differences over space - Dominguez et al. (2016) data
-Detal_medagexspace <- list(N = 6,
-                           Locality = Detal$Locality,
-                           Reef = Detal$Reef,
-                           Reef2Locality = Detal$Reef2Locality,
-                           x = Detal$median_age_bp,
-                           nL = Detal$nL,
-                           nR = Detal$nR)
-
-#for CPE depth differences over space - Dominguez et al. (2016) data
-Detal_cpexspace <- list(N = 6,
-                        Locality = Detal$Locality,
-                        Reef = Detal$Reef,
-                        Reef2Locality = Detal$Reef2Locality,
-                        x = Detal$Sample_corrected_posterior_age_estimate,
-                        nL = Detal$nL,
-                        nR = Detal$nR)
 
 ```
 
@@ -203,9 +235,7 @@ datalists <- c(as.name("HOBS_medagexspace_15to25cm"),
                as.name("HOBS_medagexspace_25to35cm"),
                as.name("HOBS_cpexspace_25to35cm"),
                as.name("HOBS_medageddxspace"),
-               as.name("HOBS_cpeddxspace"),
-               as.name("Detal_medagexspace"),
-               as.name("Detal_cpexspace"))
+               as.name("HOBS_cpeddxspace"))
 
 for(Data in datalists){
   if(str_detect(Data, "HOBS")){
@@ -219,19 +249,25 @@ for(Data in datalists){
         chains = 8,
         parallel_chains = 8,
         refresh = 1000,
-        iter_warmup = 3000, #3000,
+        iter_warmup = 5000, #3000,
         iter_sampling = 15000,
-        thin =  3,
+        thin =  5,
         adapt_delta = 0.99,
         max_treedepth = 15)
+
   
   fit$save_output_files("StanOutput")
-  fit$cmdstan_diagnose()
+  fitdiag <- fit$cmdstan_diagnose()
+  fwrite(fitdiag, file = here::here(paste0("StanOutput/", Data, "_diagnostics.txt")))
   dim(fit$draws()) # accessing draws seems to fill the structure with draws
   saveRDS(fit, file = here::here(paste0("StanOutput/", Data, ".rds")))
   
+}
+  
+  
   plot1 <- bayesplot::mcmc_intervals(fit$draws("mu_locality")) 
   plot1 <- plot1 +
+    geom_point(data = Data, aes(x = x, y = Locality - 12), color = "red") +
     geom_text(data = locs, aes(x = min(plot1$data$ll) - 3, y = loclab, label = locality), inherit.aes = FALSE) +
     xlim(min(plot1$data$ll) - 5, max(plot1$data$hh))
   
@@ -255,7 +291,7 @@ for(Data in datalists){
          height = 6,
          units = "in",
          dpi = 400)
-}
+
 
 ```
 

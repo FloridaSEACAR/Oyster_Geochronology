@@ -18,6 +18,6 @@ Curve$D14C = coef(fit)[1] + coef(fit)[2] * Curve$F14C #F14C.D14C(Curve$F14C, t =
 
 Curve$D14Csd = coef(fit)[2] * Curve$F14Csd
 names(Curve)[1] = "#year" # force a comment in the first row
-write.table(Curve, "/Users/johnhandley/Documents/PaleontologyResearch/Oysters/HOBS/Contract work/Comparisons/Kowalewski_NP/Curves/HOBS_14C_CalCurve_PredictedVals_20230524.14c", sep = "\t", row.names = FALSE, quote = FALSE)
+write.table(Curve, here::here("CZ325_Sampling_task_2/HOBS_14C_CalCurve_PredictedVals_20230524.14c"), sep = "\t", row.names = FALSE, quote = FALSE)
 curvename = "HOBS_14C_CalCurve_PredictedVals_20230524"
-curvepath = "/Users/johnhandley/Documents/PaleontologyResearch/Oysters/HOBS/Contract work/Comparisons/Kowalewski_NP/Curves/HOBS_14C_CalCurve_PredictedVals_20230524.14c"
+curvepath = here::here("CZ325_Sampling_task_2/HOBS_14C_CalCurve_PredictedVals_20230524.14c")

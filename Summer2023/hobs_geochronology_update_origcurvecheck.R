@@ -284,7 +284,7 @@ for(i in seq(1, nrow(newcurvepreds3_oto))){
 
 newdat3_cor <- data.table(year = seq(min(gamtest7$data$year), 2022, 0.5),
                           current = 65,
-                          source = "otolith")
+                          source = "coral")
 predvals_cor <- posterior_predict(gamtest7, newdata = newdat3_cor, ndraws = 1000, allow_new_levels = TRUE)
 newcurvepreds3_cor <- newdat3_cor[, .(year)]
 for(i in seq(1, nrow(newcurvepreds3_cor))){
@@ -335,6 +335,7 @@ predictedCurve <- rbind(m20, predictedCurve)
 #                                                      f14c_ref_sd = max(c(sqrt(1/sum(1/f14c_sd^2)),
 #                                                                          sqrt((.N * sum(((f14c - sum(f14c/f14c_sd^2)/sum(1/f14c_sd^2))^2/f14c_sd^2)))/((.N - 1) * sum(1/f14c_sd^2))))))]
 
+#Get predicted curve f14c values for collection years in the hobsf14c data (and two years prior at half-year intervals)
 yrs <- unique(sort(unlist(lapply(unique(year(hobsf14c$collection_date)), function(x) seq(x, x - 2, -0.5)))))
 yrs <- unique(sort(unlist(lapply(yrs, function(x) ifelse(x <= 1950, plyr::round_any(x, 10), x))))) #round pre-1950 yrs to nearest decade
 refvals <- predictedCurve[year %in% yrs, .(year, f14c_mn, f14c_sd)]
@@ -350,6 +351,7 @@ refvals[, `:=` (f14c_high = f14c_mn + f14c_sd, f14c_low = f14c_mn - f14c_sd)]
 #                                                                                                        f14c_sd = max(c(sqrt(1/sum(1/f14c_sd^2)),
 #                                                                                                                        sqrt((.N * sum((f14c - sum(f14c/f14c_sd^2)/sum(1/f14c_sd^2))^2/f14c_sd^2))/((.N - 1) * sum(1/f14c_sd^2)))))), by = list(year(collection_date), locality)]
 
+#Average f14c for each locality x year that has live-caught specimens in the HP 14C dataset
 deadC <- hobsf14c[analysis == "HP" & live_or_dead == "Live-caught", .(n = .N,
                                                                       f14c_mn = sum(f14c/f14c_sd^2)/sum(1/f14c_sd^2),
                                                                       f14c_sd = max(c(sqrt(1/sum(1/f14c_sd^2)),
@@ -365,8 +367,11 @@ deadC <- hobsf14c[analysis == "HP" & live_or_dead == "Live-caught", .(n = .N,
 setnames(deadC, c("locality"), c("loc"))
 
 # deadC[, `:=` (loc = locality, yr = year)]
+#fix f14c_sd values for locality x year combinations represented by only one specimen
 deadC[n == 1, f14c_sd := hobsf14c[year(collection_date) == yr & locality == loc, f14c_sd], by = list(yr, loc)]
 deadC[, yr2 := ifelse(yr <= 1950, plyr::round_any(yr, 10), yr)] #round years <= 1950 to nearest decade to match Marine20 resolution
+
+#Calculate mean and sd ref values for two years prior to each collection year in deadC (also calculate low and high ref values for each deadC year based on +/- sd of ref curve)
 deadC[, `:=` (ref_mn = refvals[year %in% seq(yr2, yr2 - 2, -0.5), sum(f14c_mn/f14c_sd^2)/sum(1/f14c_sd^2)],
               ref_sd = refvals[year %in% seq(yr2, yr2 - 2, -0.5), max(c(sqrt(1/sum(1/f14c_sd^2)),
                                                                       sqrt((.N * sum((f14c_mn - sum(f14c_mn/f14c_sd^2)/sum(1/f14c_sd^2))^2/f14c_sd^2))/((.N - 1) * sum(1/f14c_sd^2))))[which(!is.nan(c(sqrt(1/sum(1/f14c_sd^2)),
@@ -388,7 +393,7 @@ deadC[, `:=` (ref_mn_orig = refval_orig$f14c_mn,
               ref_mn_h_orig = refval_orig$f14c_high,
               ref_sd_h_orig = refval_orig$f14c_sd)]
 
-
+#Calculate modern f14c for 2018 (HOBS collection year) as average of 2019-2022 f14c values for reach locality
 dc18 <- deadC[yr %in% c(2019, 2020, 2022), .(n = .N,
                                              yr = 2018,
                                              yr2 = 2018,
@@ -405,17 +410,21 @@ dc18 <- deadC[yr %in% c(2019, 2020, 2022), .(n = .N,
                                              ref_sd_h = max(c(sqrt(1/sum(1/ref_sd_h^2)),
                                                             sqrt((.N * sum((ref_mn_h - sum(ref_mn_h/ref_sd_h^2)/sum(1/ref_sd_h^2))^2/ref_sd_h^2))/((.N - 1) * sum(1/ref_sd_h^2)))))), by = loc]
 setnames(dc18, c("yr", "loc"), c("year", "locality"))
+#Fix SD values for cases where locality x year has only one specimen
 dc18[n == 1, `:=` (f14c_sd = deadC[loc == locality, unique(f14c_sd)],
                    ref_sd = deadC[loc == locality, unique(ref_sd)],
                    ref_sd_l = deadC[loc == locality, unique(ref_sd_l)],
                    ref_sd_h = deadC[loc == locality, unique(ref_sd_h)]), by = locality][, n := 2]
 deadC <- rbind(deadC, dc18[, .(yr = year, yr2, loc = locality, n, f14c_mn, f14c_sd, ref_mn, ref_sd, ref_mn_l, ref_sd_l, ref_mn_h, ref_sd_h)])
+#calculate dead carbon estimate for each year and locality
 deadC[, `:=` (deadc = 1 - f14c_mn/ref_mn,
               deadc_sd = sqrt((f14c_sd/ref_mn)^2 + (ref_sd * f14c_mn/ref_mn^2)^2),
               deadc_l = 1 - f14c_mn/ref_mn_l,
               deadc_sd_l = sqrt((f14c_sd/ref_mn_l)^2 + (ref_sd_l * f14c_mn/ref_mn_l^2)^2),
               deadc_h = 1 - f14c_mn/ref_mn_h,
               deadc_sd_h = sqrt((f14c_sd/ref_mn_h)^2 + (ref_sd_h * f14c_mn/ref_mn_h^2)^2)), by = row.names(deadC)]
+
+#Create a column where the museum specimens are assigned to the closest HOBS locality
 deadC[yr %in% c(1932, 1938, 1940, 1952, 1979), loc_rectest := fcase(yr == 1932, "Big Hickory",
                                                                     yr == 1938, "Little St. George Island",
                                                                     yr == 1940, "Lone Cabbage",
@@ -483,7 +492,7 @@ deadC[, `:=` (deadc = 1 - f14c_mn/ref_mn_orig,
 # fwrite(deadC3, here::here("DeadC_CalcCompare.csv"))
 
 
-#Correct the f14c values using the dead carbon value for the relevant locality
+#Correct the f14c values using the dead carbon value for the relevant locality x year
 hobsf14c[!is.na(locality), `:=` (f14c_corr = f14c/(1 - deadC[loc == locality & yr == year(collection_date), deadc]),
                                  f14c_corr_sd = sqrt((f14c_sd/(1 - deadC[loc == locality & yr == year(collection_date), deadc]))^2 + (deadC[loc == locality & yr == year(collection_date), deadc_sd] * f14c/(1 - deadC[loc == locality & yr == year(collection_date), deadc])^2)^2),
                                  f14c_corr_l = f14c/(1 - deadC[loc == locality & yr == year(collection_date), deadc_l]),
@@ -500,6 +509,7 @@ hobsf14c[!is.na(locality), `:=` (f14c_corr = f14c/(1 - deadC[loc == locality, de
                                  f14c_corr_sd_h = sqrt((f14c_sd/(1 - deadC[loc == locality, deadc_h]))^2 + (deadC[loc == locality, deadc_sd_h] * f14c/(1 - deadC[loc == locality, deadc_h])^2)^2)), by = row.names(hobsf14c)]
 
 
+#Create a column where the museum specimens are assigned to the closest HOBS locality
 hobsf14c[, locality_rectest := fcase(year(collection_date) == 1932, "Big Hickory",
                                      year(collection_date) == 1938, "Little St. George Island",
                                      year(collection_date) == 1940, "Lone Cabbage",
@@ -507,6 +517,8 @@ hobsf14c[, locality_rectest := fcase(year(collection_date) == 1932, "Big Hickory
                                      year(collection_date) == 1979, "Lone Cabbage",
                                      default = NA)]
 hobsf14c[is.na(locality_rectest), locality_rectest := locality]
+
+#calculate f14c corrected values using the 2018 value that was derived from the weighted average calibration curve predictions instead of just the live-caught specimens alone
 hobsf14c[, `:=` (f14c_corr_rectest = f14c/(1 - deadC[loc == locality_rectest & yr == 2018, deadc]),
                  f14c_corr_sd_rectest = sqrt((f14c_sd/(1 - deadC[loc == locality_rectest & yr == 2018, deadc]))^2 + (deadC[loc == locality & yr == 2018, deadc_sd] * f14c/(1 - deadC[loc == locality & yr == 2018, deadc])^2)^2),
                  f14c_corr_l_rectest = f14c/(1 - deadC[loc == locality_rectest & yr == 2018, deadc_l]),
