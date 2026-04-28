@@ -795,6 +795,36 @@ windat_as3[!is.na(sal) & !is.na(temp) & !is.na(alk) & !is.na(ph), dic := carb(fl
                                                                               Pt = 0, 
                                                                               Sit = 0)$DIC, by = .I]
 
+windat_as3[!is.na(sal) & !is.na(temp) & !is.na(alk) & !is.na(ph), c("dic", "dic_flag") := {
+    w <- character()
+    
+    ans <- withCallingHandlers(
+      tryCatch(
+        carb(flag = 8, 
+             var1 = ph,
+             var2 = alk_mol, 
+             S = sal, 
+             T = temp, 
+             P = pressure, 
+             Pt = 0, 
+             Sit = 0),
+      error = function(e) e),
+      warning = function(cond){
+        w <<- conditionMessage(cond)
+        invokeRestart("muffleWarning")
+      })
+    
+    if(inherits(ans, "error")){
+      list(NA_real_,
+           paste0("Error: ", conditionMessage(ans)))
+      
+    } else{
+      list(ans$DIC,
+           if(unique(w) == "") NA_character_ else paste0(unique(w), collapse = " | "))
+      
+    }
+  }, by = .I]
+
 windat_as3[, coords := paste0(dep_latitude, "_", dep_longitude)]
 
 # #check out the relationship
@@ -1378,6 +1408,49 @@ dicsalmod_skew2 <- brm(bf(dic ~ scale(sal) + (1 + scale(sal) | season) + (1 | ye
                       threads = threading(2),
                       file = here::here("dicsalmod_skew2.rds"))
 dicsalmod_skew2 <- add_criterion(dicsalmod_skew2, "loo", moment_match = T)
+
+dicsalmods_loc <- list()
+for(loc in windat_as3[!is.na(dic) & hobs_loc %in% windat_as3[!is.na(dic), names(table(hobs_loc))[which(table(hobs_loc) >= 50)]], unique(hobs_loc)]){
+  cat("Starting locality ", loc, "\n\n", sep = "")
+  
+  n_loc <- which(windat_as3[!is.na(dic) & hobs_loc %in% windat_as3[!is.na(dic), names(table(hobs_loc))[which(table(hobs_loc) >= 50)]], unique(hobs_loc)] == loc)
+  
+  if(!exists("mod_loc")){
+    mod_loc <- brm(bf(dic ~ scale(sal) + (1 + scale(sal) | season) + (1 | year),
+                             sigma ~ season),
+                    family = skew_normal(),
+                    data = windat_as3[hobs_loc == loc & !is.na(sal) & !is.na(dic), ], 
+                    cores = 4, 
+                    seed = 456, 
+                    chains = 4, 
+                    iter = 5000, 
+                    warmup = 1500, 
+                    control = list(adapt_delta = 0.99, 
+                                   max_treedepth = 15), 
+                    backend = "cmdstanr", 
+                    threads = threading(2),
+                    file = here::here(paste0("CalCurve/DIC_v_Sal/dicsalmod_", loc, ".rds")))
+    
+    dicsalmods_loc[[n_loc]] <- mod_loc
+    
+  } else{
+    mod_loc <- update(mod_loc,
+                      newdata = windat_as3[hobs_loc == loc & !is.na(sal) & !is.na(dic), ], 
+                      cores = 4, 
+                      seed = 456, 
+                      chains = 4, 
+                      iter = 5000, 
+                      warmup = 1500, 
+                      control = list(adapt_delta = 0.99, 
+                                     max_treedepth = 15), 
+                      backend = "cmdstanr", 
+                      threads = threading(2),
+                      file = here::here(paste0("CalCurve/DIC_v_Sal/dicsalmod_", loc, ".rds")))
+    
+    dicsalmods_loc[[n_loc]] <- mod_loc
+    
+  }
+}
 
 
 # loo_compare(dicsalmod, dicsalmod2, dicsalmod_log, dicsalmod_skew, dicsalmod_skew2) #skew2 model fits best by a hair according to loo, and looks best in terms of ppc - stick with it.
